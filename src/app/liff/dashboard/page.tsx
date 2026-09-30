@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   AlertCircle,
   PiggyBank,
+  Download,
 } from "lucide-react";
 import { DeleteExpenseButton } from "./DeleteExpenseButton";
 
@@ -467,9 +468,22 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
         {/* Recent Transactions List */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Receipt className="w-4 h-4 text-slate-600" />
-            <h2 className="font-bold text-sm text-slate-900">ประวัติสลิปและรายการย้อนหลัง</h2>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Receipt className="w-4 h-4 text-slate-600" />
+              <h2 className="font-bold text-sm text-slate-900">ประวัติสลิปและรายการย้อนหลัง</h2>
+            </div>
+            {recentExpenses.length > 0 && groupId && (
+              <a
+                href={`/api/expenses/export?groupId=${encodeURIComponent(groupId)}${pin ? `&pin=${encodeURIComponent(pin)}` : ""}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200/70 shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>ส่งออก Excel</span>
+              </a>
+            )}
           </div>
 
           {recentExpenses.length === 0 ? (

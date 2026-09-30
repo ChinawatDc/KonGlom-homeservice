@@ -8,6 +8,7 @@ import {
   homeMaintenance,
   uploadedFilesQueue,
   familySettings,
+  pantryItems,
 } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import {
@@ -23,6 +24,7 @@ import {
   buildDashboardLinkFlexMessage,
   buildBatchSummaryFlexMessage,
   buildFamilySettingsFlexMessage,
+  buildWelcomeFlexMessage,
 } from "@/lib/line";
 import {
   parseSlipDocument,
@@ -62,16 +64,37 @@ export async function POST(req: Request) {
       const userId = event.source?.userId;
 
       // =========================================================================
-      // จัดการเมื่อบอทถูกเชิญเข้ากลุ่ม (Join) หรือมีคนแอดเพื่อน (Follow)
+      // จัดการเมื่อบอทถูกเชิญเข้ากลุ่ม (Join) หรือมีคนแอดเพื่อน (Follow) (1-Click Onboarding)
       // =========================================================================
       if (event.type === "join" || event.type === "follow") {
         if (replyToken) {
+          const existingFamily = await db
+            .select()
+            .from(familySettings)
+            .where(eq(familySettings.groupId, groupId))
+            .limit(1);
+
+          let familyName = "บ้านก้อนกลม";
+          if (existingFamily.length === 0) {
+            await db
+              .insert(familySettings)
+              .values({
+                groupId,
+                familyName: "บ้านก้อนกลม",
+              })
+              .onConflictDoNothing();
+          } else {
+            familyName = existingFamily[0].familyName || "บ้านก้อนกลม";
+          }
+
+          const welcomeFlex = buildWelcomeFlexMessage(groupId, familyName);
           await lineClient.replyMessage({
             replyToken,
             messages: [
               {
-                type: "text",
-                text: "🏡 สวัสดีครับทุกคน! ผม 'คนกลม' ผู้ช่วยประจำบ้าน ยินดีที่ได้มารับใช้ทุกคนครับ\n\n📌 สิ่งที่ผมช่วยดูแลในกลุ่มนี้:\n1. 💸 สแกนสลิปเงิน: ส่งรูปสลิปเข้ามา ผมจะอ่านยอดเงิน จดบันทึก และสำรองไฟล์เข้า Google Drive ให้อัตโนมัติ\n2. 📊 เคลียร์เงินกองกลาง: พิมพ์ \"@บอท เคลียร์เงิน\" เพื่อดูสรุปยอดและวิธีหาร\n3. ⏰ เตือนความจำ: ส่งคลิปเสียงพูด หรือพิมพ์ \"@บอท เตือน [เรื่อง] [วันเวลา]\"\n4. 🍳 เมนูอาหาร: พิมพ์ \"@บอท กินไรดี\" หรือส่งรูปของในตู้เย็น\n5. 💊 เช็กยา/ข่าวสุขภาพ: ส่งรูปซองยา หรือพิมพ์ \"@บอท เช็กข่าว [ข้อความ]\"\n\nลองส่งสลิปหรือพิมพ์ \"@บอท\" ดูได้เลยครับ!",
+                type: "flex",
+                altText: `🎉 ยินดีต้อนรับสู่ KonGlom น้องกลม ประจำ${familyName}`,
+                contents: welcomeFlex as any,
               },
             ],
           });
@@ -155,6 +178,33 @@ export async function POST(req: Request) {
             cleanFileName = `${datePrefix}_${docSummary.suggested_filename || originalName}`;
             amountStr = docSummary.amount ? docSummary.amount.toString() : null;
             isExpense = false;
+
+            // Feature C: ตรวจจับวันครบกำหนดชำระบิล (Due Date) และตั้งเตือนความจำล่วงหน้าอัตโนมัติ
+            if (docSummary.due_date) {
+              try {
+                const parsedDueDate = new Date(docSummary.due_date);
+                let reminderTime: Date;
+                if (!isNaN(parsedDueDate.getTime())) {
+                  const targetTime = new Date(parsedDueDate);
+                  targetTime.setDate(targetTime.getDate() - 2);
+                  targetTime.setHours(9, 0, 0, 0);
+                  reminderTime = targetTime.getTime() > Date.now() ? targetTime : parsedDueDate;
+                } else {
+                  reminderTime = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+                }
+
+                await db.insert(reminders).values({
+                  groupId,
+                  lineUserId: userId || "system",
+                  title: `ชำระบิล: ${docSummary.doc_title}${docSummary.amount ? ` (฿${Number(docSummary.amount).toLocaleString("th-TH")})` : ""}`,
+                  targetPerson: "ทุกคนในบ้าน",
+                  dueDateTime: reminderTime,
+                  originalInput: `สร้างเตือนอัตโนมัติจากไฟล์บิล ${originalName} (ครบกำหนด: ${docSummary.due_date})`,
+                });
+              } catch (reminderErr) {
+                console.error("Auto bill reminder creation failed:", reminderErr);
+              }
+            }
           }
           // 4. ถ้าเป็นรูปภาพ (PNG / JPG)
           else if (message.type === "image") {
@@ -485,9 +535,73 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.4 คำสั่งเมนูตู้เย็น (Phase 5)
+        // 3.4 คำสั่งตู้เย็นและคลังอาหารประจำบ้าน (Feature G: Smart Pantry Expiry Guard)
+        if (
+          text.startsWith("@กลม แช่") ||
+          text.startsWith("@กลม ซื้อของ") ||
+          text.startsWith("@บอท แช่") ||
+          text.startsWith("แช่ ")
+        ) {
+          const itemText = text.replace(/^(@(กลม|บอท)\s*)?(แช่|ซื้อของ)\s*/i, "").trim();
+          if (itemText) {
+            await db.insert(pantryItems).values({
+              groupId,
+              itemName: itemText,
+              category: "ตู้เย็น",
+              expiryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // หมดอายุเริ่มต้นใน 7 วัน
+            });
+
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: `🧊 บันทึก "${itemText}" เข้าตู้เย็นเรียบร้อยครับ!\n\n💡 พิมพ์ "@กลม ตู้เย็น" เพื่อดูของทั้งหมด\n💡 พิมพ์ "@กลม กินไรดี" เพื่อให้ผมคิดเมนูจากของในตู้เย็นได้เลย`,
+                },
+              ],
+            });
+            continue;
+          }
+        }
+
+        if (text.includes("ตู้เย็น") || text.includes("ของในตู้")) {
+          const items = await db
+            .select()
+            .from(pantryItems)
+            .where(eq(pantryItems.groupId, groupId))
+            .limit(20);
+
+          let replyText = "🧊 ของในตู้เย็นและคลังอาหารประจำบ้าน:\n";
+          if (items.length === 0) {
+            replyText += "ยังไม่มีรายการของในตู้เย็น\n\n💡 พิมพ์ \"@กลม แช่ [ชื่อวัตถุดิบ]\" เช่น \"@กลม แช่ หมูสับ, ไข่ไก่\" เพื่อเริ่มบันทึกได้เลยครับ";
+          } else {
+            items.forEach((item, idx) => {
+              replyText += `\n${idx + 1}. ${item.itemName}`;
+              if (item.expiryDate) {
+                const diffDays = Math.ceil((new Date(item.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                replyText += ` (${diffDays > 0 ? `เหลืออีก ${diffDays} วัน` : "⚠️ ใกล้/หมดอายุ"})`;
+              }
+            });
+            replyText += "\n\n💡 พิมพ์ \"@กลม กินไรดี\" เพื่อสร้างเมนูอาหารจากของเหล่านี้";
+          }
+
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [{ type: "text", text: replyText }],
+          });
+          continue;
+        }
+
         if (text.includes("กินไรดี") || text.includes("เมนูวันนี้")) {
-          const recipes = await suggestFridgeRecipes(undefined, text);
+          const items = await db
+            .select()
+            .from(pantryItems)
+            .where(eq(pantryItems.groupId, groupId))
+            .limit(10);
+
+          const fridgeList = items.map((i) => i.itemName).join(", ");
+          const promptInput = fridgeList ? `ของในตู้เย็นที่มี: ${fridgeList}. ${text}` : text;
+          const recipes = await suggestFridgeRecipes(undefined, promptInput);
           await lineClient.replyMessage({
             replyToken,
             messages: [

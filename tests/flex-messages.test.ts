@@ -9,6 +9,8 @@ import {
   buildDashboardLinkFlexMessage,
   buildBatchSummaryFlexMessage,
   buildFamilySettingsFlexMessage,
+  buildWelcomeFlexMessage,
+  buildWeeklyDigestFlexMessage,
 } from "../src/lib/line";
 
 describe("LINE Flex Message Builders", () => {
@@ -152,6 +154,35 @@ describe("LINE Flex Message Builders", () => {
     expect(flex.header.contents[1].text).toBe("บ้านคนกลม 88");
     expect((flex.body as any).contents[0].contents[1].text).toContain("ตั้งแล้ว (4 หลัก)");
     expect((flex.body as any).contents[3].contents[1].text).toBe("PRO");
+  });
+
+  it("should generate a valid Welcome Flex Message (1-Click Onboarding)", () => {
+    const flex = buildWelcomeFlexMessage("group123", "บ้านก้อนกลม");
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toContain("น้องกลม");
+    expect(flex.header.contents[2].text).toContain("บ้านก้อนกลม");
+    expect(flex.footer.contents[0].action.uri).toContain("group123");
+  });
+
+  it("should generate a valid Weekly Digest Flex Message", () => {
+    const flex = buildWeeklyDigestFlexMessage({
+      familyName: "บ้านก้อนกลม",
+      startDate: "23 ก.ย. 2569",
+      endDate: "30 ก.ย. 2569",
+      totalAmount: 14500,
+      transactionCount: 18,
+      topCategory: "อาหารและของใช้",
+      topCategoryAmount: 6200,
+      topSpender: "คุณแม่",
+      topSpenderAmount: 8900,
+      dashboardUrl: "https://kon-glom-homeservice.vercel.app/liff/dashboard?groupId=test123",
+    });
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toBe("บ้านก้อนกลม");
+    expect((flex.body as any).contents[0].contents[1].text).toContain("14,500.00");
+    expect(flex.footer.contents[0].action.uri).toContain("test123");
   });
 });
 

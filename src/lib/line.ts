@@ -520,6 +520,205 @@ export function buildFamilySettingsFlexMessage(info: FamilySettingsInfo) {
   };
 }
 
+/**
+ * Flex Message: ข้อความต้อนรับเมื่อดึงน้องกลมเข้ากลุ่มใหม่ (1-Click Onboarding)
+ */
+export function buildWelcomeFlexMessage(groupId: string, familyName: string = "บ้านก้อนกลม") {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://kon-glom-homeservice.vercel.app";
+  const dashboardUrl = `${appUrl}/liff/dashboard?groupId=${encodeURIComponent(groupId)}`;
+
+  return {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#059669",
+      contents: [
+        { type: "text", text: "🎉 ยินดีต้อนรับสู่ KonGlom", color: "#A7F3D0", size: "xs", weight: "bold" },
+        { type: "text", text: "🏡 สวัสดีครับ! ผมคือ น้องกลม", color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" },
+        { type: "text", text: `ผู้ช่วยอัจฉริยะประจำ ${familyName}`, color: "#D1FAE5", size: "xs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        {
+          type: "text",
+          text: "✨ สิ่งที่ผมพร้อมช่วยดูแลครอบครัวของคุณ:",
+          size: "xs",
+          weight: "bold",
+          color: "#1E293B",
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          spacing: "xs",
+          contents: [
+            { type: "text", text: "💸 ส่งรูปสลิป / PDF ➔ บันทึกรายจ่าย + เก็บเข้า Google Drive ประจำบ้าน", size: "xs", color: "#475569", wrap: true },
+            { type: "text", text: "📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ หารเฉลี่ยค่าใช้จ่ายกองกลาง", size: "xs", color: "#475569", wrap: true },
+            { type: "text", text: "🔒 พิมพ์ \"@กลม ตั้งรหัส 1234\" ➔ ตั้งรหัสล็อกแดชบอร์ดเฉพาะบ้าน", size: "xs", color: "#475569", wrap: true },
+            { type: "text", text: "⏰ พิมพ์ \"@กลม เตือน [เรื่อง] [เวลา]\" หรือส่งคลิปเสียง ➔ บันทึกนัดหมาย", size: "xs", color: "#475569", wrap: true },
+            { type: "text", text: "🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหารตู้เย็น", size: "xs", color: "#475569", wrap: true },
+          ],
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#059669",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "📊 เปิดดูแดชบอร์ดครอบครัว ↗",
+            uri: dashboardUrl,
+          },
+        },
+        {
+          type: "button",
+          style: "link",
+          height: "sm",
+          action: {
+            type: "message",
+            label: "📖 ดูวิธีใช้งานทั้งหมด",
+            text: "@กลม",
+          },
+        },
+      ],
+    },
+  };
+}
+
+export interface WeeklyDigestParams {
+  familyName: string;
+  startDate: string;
+  endDate: string;
+  totalAmount: number;
+  transactionCount: number;
+  topCategory?: string;
+  topCategoryAmount?: number;
+  topSpender?: string;
+  topSpenderAmount?: number;
+  dashboardUrl: string;
+}
+
+/**
+ * Flex Message: สรุปภาพรวมรายจ่ายประจำสัปดาห์ (Weekly Digest)
+ */
+export function buildWeeklyDigestFlexMessage(params: WeeklyDigestParams) {
+  const detailRows: any[] = [];
+  if (params.topCategory) {
+    detailRows.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "🏷 หมวดที่จ่ายเยอะสุด:", size: "xs", color: "#64748B", flex: 6 },
+        {
+          type: "text",
+          text: `${params.topCategory} (฿${params.topCategoryAmount?.toLocaleString("th-TH") || "0"})`,
+          size: "xs",
+          color: "#0F172A",
+          weight: "bold",
+          flex: 6,
+          align: "end",
+        },
+      ],
+    });
+  }
+  if (params.topSpender) {
+    detailRows.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "👑 ผู้จ่ายสูงสุด:", size: "xs", color: "#64748B", flex: 6 },
+        {
+          type: "text",
+          text: `${params.topSpender} (฿${params.topSpenderAmount?.toLocaleString("th-TH") || "0"})`,
+          size: "xs",
+          color: "#0F172A",
+          weight: "bold",
+          flex: 6,
+          align: "end",
+        },
+      ],
+    });
+  }
+
+  return {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#1E293B",
+      contents: [
+        { type: "text", text: "📈 สรุปรายจ่ายประจำสัปดาห์", color: "#10B981", size: "xs", weight: "bold" },
+        { type: "text", text: params.familyName, color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" },
+        { type: "text", text: `ช่วงวันที่ ${params.startDate} - ${params.endDate}`, color: "#94A3B8", size: "xxs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      contents: [
+        {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#F8FAFC",
+          cornerRadius: "md",
+          paddingAll: "md",
+          contents: [
+            { type: "text", text: "ยอดรายจ่ายรวมทั้งบ้าน", size: "xs", color: "#64748B" },
+            {
+              type: "text",
+              text: `฿${params.totalAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`,
+              size: "xl",
+              weight: "bold",
+              color: "#0F172A",
+              margin: "xs",
+            },
+            { type: "text", text: `รวมทั้งหมด ${params.transactionCount} รายการ`, size: "xxs", color: "#94A3B8", margin: "xs" },
+          ],
+        },
+        detailRows.length > 0
+          ? {
+              type: "box",
+              layout: "vertical",
+              spacing: "xs",
+              contents: detailRows,
+            }
+          : { type: "box", layout: "vertical", contents: [] },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#10B981",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "📊 เปิดดูรายละเอียดบนแดชบอร์ด ↗",
+            uri: params.dashboardUrl,
+          },
+        },
+      ],
+    },
+  };
+}
+
 export interface BatchFileItem {
   fileName: string;
   fileType: string;
