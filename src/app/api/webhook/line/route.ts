@@ -34,6 +34,7 @@ import {
   checkHealthClaim,
   suggestFridgeRecipes,
   summarizeDocument,
+  chatWithKonglom,
 } from "@/lib/gemini";
 import { uploadFileToDrive, uploadImageToDrive } from "@/lib/google-drive";
 
@@ -479,58 +480,7 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.2 คำสั่งสั่งเตือนความจำ & บันทึกนัดหมาย (Appointments & Smart Reminders)
-        const isAppointmentOrReminder =
-          text.startsWith("@กลม เตือน") ||
-          text.startsWith("@บอท เตือน") ||
-          text.startsWith("เตือน") ||
-          text.includes("มีนัด") ||
-          text.includes("นัดหมาย") ||
-          text.includes("นัดไป") ||
-          text.includes("นัดเจอ") ||
-          text.includes("นัดหมอ") ||
-          text.includes("นัดช่าง") ||
-          text.includes("อย่าลืม") ||
-          /^(@(กลม|บอท)\s*)?นัด/i.test(text) ||
-          (/^(@(กลม|บอท)\s*)/i.test(text) &&
-            (text.includes("เสาร์") ||
-              text.includes("อาทิตย์") ||
-              text.includes("จันทร์") ||
-              text.includes("อังคาร") ||
-              text.includes("พุธ") ||
-              text.includes("พฤหัส") ||
-              text.includes("ศุกร์") ||
-              text.includes("พรุ่งนี้") ||
-              text.includes("มะรืน") ||
-              text.includes("วันที่") ||
-              text.includes("นัด")));
 
-        if (isAppointmentOrReminder) {
-          const reminder = await parseVoiceOrTextReminder({ text });
-          if (reminder.is_reminder && reminder.title) {
-            await db.insert(reminders).values({
-              groupId,
-              lineUserId: userId,
-              title: reminder.title,
-              targetPerson: reminder.target_person,
-              dueDateTime: new Date(reminder.due_date_time),
-              isRecurring: reminder.is_recurring,
-              originalInput: `${text}${reminder.display_appointment ? ` (นัดหมาย: ${reminder.display_appointment})` : ""}`,
-            });
-
-            await lineClient.replyMessage({
-              replyToken,
-              messages: [
-                {
-                  type: "flex",
-                  altText: `📅 บันทึกนัดหมาย: ${reminder.title}`,
-                  contents: buildReminderFlexMessage(reminder) as any,
-                },
-              ],
-            });
-            continue;
-          }
-        }
 
         // 3.3 คำสั่งเช็กข่าวสุขภาพปลอม (Phase 4)
         if (
@@ -883,29 +833,81 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.11 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @กลม, @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
-        if (
+        // 3.11 คำสั่งช่วยเหลือ / เมนูคำสั่ง (เมื่อถามหาคู่มือหรือพิมพ์ @กลม เดี่ยวๆ)
+        const isExplicitHelp =
           text === "@กลม" ||
           text === "@บอท" ||
           text === "กลม" ||
           text === "บอท" ||
+          text === "@กลม เมนู" ||
+          text === "@กลม คู่มือ" ||
+          text === "@กลม วิธีใช้" ||
+          text === "@บอท เมนู" ||
+          text === "@บอท คู่มือ" ||
+          text === "@บอท วิธีใช้" ||
           text === "เมนู" ||
           text === "คู่มือ" ||
-          text.includes("ช่วยอะไรได้บ้าง") ||
-          text.includes("วิธีใช้") ||
-          text.startsWith("@กลม") ||
-          text.startsWith("@บอท")
-        ) {
+          text === "วิธีใช้" ||
+          text.includes("ช่วยอะไรได้บ้าง");
+
+        if (isExplicitHelp) {
           await lineClient.replyMessage({
             replyToken,
             messages: [
               {
                 type: "text",
-                text: "🏡 [น้องกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@กลม แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 🔒 พิมพ์ \"@กลม ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n5. 🏡 พิมพ์ \"@กลม ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n6. 📁 พิมพ์ \"@กลม ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n7. ⚙️ พิมพ์ \"@กลม ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n8. ⏰ พิมพ์ \"@กลม เตือน [เรื่อง] [วันเวลา]\" หรือส่งคลิปเสียง ➔ บันทึกนัดหมาย\n9. 🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหาร\n10. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n11. 🩺 พิมพ์ \"@กลม เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n12. 🛠 พิมพ์ \"@กลม ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
+                text: "🏡 [น้องกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@กลม แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 🔒 พิมพ์ \"@กลม ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n5. 🏡 พิมพ์ \"@กลม ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n6. 📁 พิมพ์ \"@กลม ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n7. ⚙️ พิมพ์ \"@กลม ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n8. ⏰ พิมพ์ \"@กลม เตือน [เรื่อง] [วันเวลา]\" หรือบอกนัดหมาย เช่น \"@กลม เย็นนี้ไปไหว้พระ 4 โมงครึ่ง\"\n9. 🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหาร\n10. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n11. 🩺 พิมพ์ \"@กลม เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n12. 🛠 พิมพ์ \"@กลม ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
               },
             ],
           });
           continue;
+        }
+
+        // 3.12 นัดหมายอัจฉริยะ & ผู้ช่วยสนทนาประจำบ้าน (Appointments & AI Assistant)
+        const isAddressingBot =
+          text.startsWith("@กลม") ||
+          text.startsWith("@บอท") ||
+          text.startsWith("เตือน") ||
+          text.includes("มีนัด") ||
+          text.includes("นัดหมาย") ||
+          text.includes("อย่าลืม");
+
+        if (isAddressingBot) {
+          const reminder = await parseVoiceOrTextReminder({ text });
+          if (reminder.is_reminder && reminder.title) {
+            await db.insert(reminders).values({
+              groupId,
+              lineUserId: userId,
+              title: reminder.title,
+              targetPerson: reminder.target_person,
+              dueDateTime: new Date(reminder.due_date_time),
+              isRecurring: reminder.is_recurring,
+              originalInput: `${text}${reminder.display_appointment ? ` (นัดหมาย: ${reminder.display_appointment})` : ""}`,
+            });
+
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "flex",
+                  altText: `📅 บันทึกนัดหมาย: ${reminder.title}`,
+                  contents: buildReminderFlexMessage(reminder) as any,
+                },
+              ],
+            });
+            continue;
+          }
+
+          // กรณีไม่ได้เป็นนัดหมาย แต่ผู้ใช้เอ่ยเรียก @กลม ให้ตอบกลับแบบ AI Assistant ประจำบ้าน
+          if (text.startsWith("@กลม") || text.startsWith("@บอท")) {
+            const cleanText = text.replace(/^@(กลม|บอท)\s*/i, "").trim();
+            const botReply = await chatWithKonglom(cleanText || text);
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [{ type: "text", text: botReply }],
+            });
+            continue;
+          }
         }
       }
     }
