@@ -358,7 +358,11 @@ export function buildDocumentSummaryFlexMessage(
 /**
  * Flex Message: ส่งลิงก์เข้าสู่แดชบอร์ดส่วนตัวของบ้านอย่างปลอดภัย
  */
-export function buildDashboardLinkFlexMessage(dashboardUrl: string) {
+export function buildDashboardLinkFlexMessage(
+  dashboardUrl: string,
+  familyName: string = "ครอบครัวคนกลม",
+  isPinProtected: boolean = false
+) {
   return {
     type: "bubble",
     size: "kilo",
@@ -367,7 +371,7 @@ export function buildDashboardLinkFlexMessage(dashboardUrl: string) {
       layout: "vertical",
       backgroundColor: "#1E293B",
       contents: [
-        { type: "text", text: "🏡 คนกลม โฮมเซอร์วิส", color: "#10B981", size: "xs", weight: "bold" },
+        { type: "text", text: `🏡 ${familyName}`, color: "#10B981", size: "xs", weight: "bold" },
         { type: "text", text: "📊 แดชบอร์ดรายจ่ายของบ้าน", color: "#FFFFFF", size: "md", weight: "bold", margin: "xs" },
       ],
     },
@@ -378,7 +382,9 @@ export function buildDashboardLinkFlexMessage(dashboardUrl: string) {
       contents: [
         {
           type: "text",
-          text: "🔒 ลิงก์นี้ผูกกับกลุ่มครอบครัวของคุณโดยเฉพาะ เพื่อความปลอดภัยและความเป็นส่วนตัวของบ้าน",
+          text: isPinProtected
+            ? "🔒 แดชบอร์ดนี้มีการป้องกันด้วยรหัส PIN ประจำบ้าน เพื่อความปลอดภัยสูงสุดของข้อมูลครอบครัว"
+            : "🔒 ลิงก์นี้ผูกกับกลุ่มครอบครัวของคุณโดยเฉพาะ เพื่อความปลอดภัยและความเป็นส่วนตัวของบ้าน",
           size: "xs",
           color: "#64748B",
           wrap: true,
@@ -397,6 +403,299 @@ export function buildDashboardLinkFlexMessage(dashboardUrl: string) {
           action: {
             type: "uri",
             label: "เปิดดูแดชบอร์ดครอบครัว ↗",
+            uri: dashboardUrl,
+          },
+        },
+      ],
+    },
+  };
+}
+
+export interface FamilySettingsInfo {
+  familyName: string;
+  familyPin?: string | null;
+  adminLineUserId?: string | null;
+  adminName?: string | null;
+  driveFolderId?: string | null;
+  subscriptionPlan?: string | null;
+  monthlyBudget?: string | null;
+}
+
+/**
+ * สร้าง Flex Message การตั้งค่าและข้อมูลบ้าน (Multi-Family SaaS)
+ */
+export function buildFamilySettingsFlexMessage(info: FamilySettingsInfo) {
+  const isPinSet = Boolean(info.familyPin);
+  const pinDisplay = isPinSet ? `ตั้งแล้ว (${info.familyPin?.length} หลัก)` : "ยังไม่ได้ตั้งรหัส";
+  const driveDisplay = info.driveFolderId
+    ? `ไดรฟ์เฉพาะบ้าน (${info.driveFolderId.slice(0, 10)}...)`
+    : "โฟลเดอร์ส่วนกลาง";
+
+  return {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#0F172A",
+      contents: [
+        { type: "text", text: "⚙️ ข้อมูลและการตั้งค่าบ้าน", color: "#10B981", size: "xs", weight: "bold" },
+        { type: "text", text: info.familyName, color: "#FFFFFF", size: "lg", weight: "bold", margin: "xs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "🔒 รหัส PIN ป้องกัน:", size: "xs", color: "#94A3B8", flex: 5 },
+            {
+              type: "text",
+              text: pinDisplay,
+              size: "xs",
+              color: isPinSet ? "#10B981" : "#F59E0B",
+              weight: "bold",
+              flex: 5,
+              align: "end",
+            },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "👑 หัวหน้าบ้าน (Admin):", size: "xs", color: "#94A3B8", flex: 5 },
+            {
+              type: "text",
+              text: info.adminName || (info.adminLineUserId ? `${info.adminLineUserId.slice(0, 8)}...` : "ยังไม่ระบุ"),
+              size: "xs",
+              color: "#F8FAFC",
+              flex: 5,
+              align: "end",
+            },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "📁 Google Drive:", size: "xs", color: "#94A3B8", flex: 5 },
+            { type: "text", text: driveDisplay, size: "xs", color: "#38BDF8", flex: 5, align: "end" },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "⭐ แผนบริการ:", size: "xs", color: "#94A3B8", flex: 5 },
+            {
+              type: "text",
+              text: (info.subscriptionPlan || "free").toUpperCase(),
+              size: "xs",
+              color: "#A855F7",
+              weight: "bold",
+              flex: 5,
+              align: "end",
+            },
+          ],
+        },
+        {
+          type: "separator",
+          margin: "md",
+        },
+        {
+          type: "text",
+          text: "💡 คำสั่งตั้งค่าสำหรับบ้าน:\n• @บอท ตั้งชื่อบ้าน [ชื่อ]\n• @บอท ตั้งรหัส [PIN 4-6 หลัก]\n• @บอท ตั้งไดรฟ์ [Folder ID หรือ URL]",
+          size: "xxs",
+          color: "#64748B",
+          wrap: true,
+          margin: "sm",
+        },
+      ],
+    },
+  };
+}
+
+export interface BatchFileItem {
+  fileName: string;
+  fileType: string;
+  docCategory?: string | null;
+  docTitle?: string | null;
+  amount?: string | number | null;
+  driveUrl?: string | null;
+  isExpense?: boolean | null;
+}
+
+/**
+ * Flex Message: สรุปการสำรองไฟล์เป็นชุด (Batch Ingestion) หลังคูลดาวน์
+ */
+export function buildBatchSummaryFlexMessage(
+  files: BatchFileItem[],
+  groupId: string,
+  folderUrl: string = "https://drive.google.com/drive/u/0/folders/1WinPhipplh6_xISDEtE6UIffrfKCUt7K"
+) {
+  const imageCount = files.filter((f) => f.fileType === "image").length;
+  const pdfCount = files.filter((f) => f.fileType === "pdf").length;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://kon-glom-homeservice.vercel.app";
+  const dashboardUrl = `${appUrl}/liff/dashboard?groupId=${encodeURIComponent(groupId)}`;
+
+  const fileRows: any[] = files.slice(0, 6).map((f) => {
+    let icon = "📄";
+    let label = f.docTitle || f.fileName;
+    let badgeColor = "#64748B";
+    let badgeText = "เอกสาร";
+
+    if (f.docCategory === "payslip") {
+      icon = "💵";
+      badgeText = "สลิปเงินเดือน";
+      badgeColor = "#0284C7"; // Sky blue
+    } else if (f.docCategory === "expense_slip") {
+      icon = "🧾";
+      badgeText = "สลิปโอนเงิน";
+      badgeColor = "#10B981"; // Emerald green
+    } else if (f.docCategory === "bill") {
+      icon = "📑";
+      badgeText = "บิลรอชำระ";
+      badgeColor = "#F59E0B"; // Amber
+    } else if (f.docCategory === "medical") {
+      icon = "💊";
+      badgeText = "ยา/สุขภาพ";
+      badgeColor = "#E11D48"; // Rose
+    } else if (f.fileType === "image") {
+      icon = "📸";
+      badgeText = "รูปภาพ";
+      badgeColor = "#8B5CF6";
+    }
+
+    return {
+      type: "box",
+      layout: "horizontal",
+      spacing: "sm",
+      contents: [
+        { type: "text", text: icon, size: "sm", flex: 0 },
+        {
+          type: "box",
+          layout: "vertical",
+          flex: 4,
+          contents: [
+            { type: "text", text: label, size: "xs", weight: "bold", color: "#1E293B", wrap: true },
+            {
+              type: "box",
+              layout: "horizontal",
+              contents: [
+                { type: "text", text: badgeText, size: "xxs", color: badgeColor, weight: "bold" },
+                f.amount
+                  ? {
+                      type: "text",
+                      text: ` • ฿${Number(f.amount).toLocaleString("th-TH")}`,
+                      size: "xxs",
+                      color: "#475569",
+                      align: "start",
+                    }
+                  : { type: "filler" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  });
+
+  if (files.length > 6) {
+    fileRows.push({
+      type: "text",
+      text: `... และอีก ${files.length - 6} ไฟล์ใน Google Drive`,
+      size: "xxs",
+      color: "#94A3B8",
+      align: "center",
+      margin: "xs",
+    });
+  }
+
+  return {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#0F172A",
+      contents: [
+        { type: "text", text: "🏡 คนกลม โฮมเซอร์วิส", color: "#10B981", size: "xs", weight: "bold" },
+        {
+          type: "text",
+          text: `📁 สำรองไฟล์เข้า Google Drive สำเร็จ (${files.length} ไฟล์)`,
+          color: "#FFFFFF",
+          size: "sm",
+          weight: "bold",
+          margin: "xs",
+          wrap: true,
+        },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "md",
+      contents: [
+        {
+          type: "box",
+          layout: "horizontal",
+          backgroundColor: "#F8FAFC",
+          cornerRadius: "md",
+          paddingAll: "sm",
+          contents: [
+            {
+              type: "text",
+              text: `นำเข้าคลังแล้ว: ${imageCount > 0 ? `รูปภาพ ${imageCount} รูป ` : ""}${pdfCount > 0 ? `PDF ${pdfCount} ไฟล์` : ""}`,
+              size: "xs",
+              color: "#334155",
+              weight: "bold",
+            },
+          ],
+        },
+        {
+          type: "box",
+          layout: "vertical",
+          spacing: "sm",
+          contents: fileRows,
+        },
+        { type: "separator" },
+        {
+          type: "text",
+          text: "💡 สลิปเงินเดือน/เอกสารส่วนตัว ถูกจัดเก็บปลอดภัยใน Google Drive โดยไม่ถูกนำไปคิดเป็นรายจ่ายกองกลางครับ",
+          size: "xxs",
+          color: "#64748B",
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      spacing: "xs",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#0F172A",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "📂 เปิดโฟลเดอร์ Google Drive ↗",
+            uri: folderUrl,
+          },
+        },
+        {
+          type: "button",
+          style: "link",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "📊 ดูแดชบอร์ดครอบครัว ↗",
             uri: dashboardUrl,
           },
         },

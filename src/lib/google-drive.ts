@@ -63,10 +63,11 @@ export async function uploadFileToDrive(
   buffer: Buffer,
   fileName: string,
   mimeType: string = "image/jpeg",
-  subFolder?: string
+  subFolder?: string,
+  customParentFolderId?: string
 ): Promise<DriveUploadResult | null> {
   const drive = getDriveClient();
-  const parentFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const parentFolderId = customParentFolderId || process.env.GOOGLE_DRIVE_FOLDER_ID;
 
   if (!drive || !parentFolderId) {
     return {

@@ -37,6 +37,9 @@ async function generateWithFallback(
 
 export interface SlipData {
   is_slip: boolean;
+  doc_type?: "expense_slip" | "payslip" | "bill" | "tax_doc" | "other";
+  is_expense?: boolean;
+  title?: string;
   amount?: number;
   bank?: string;
   category?: string;
@@ -77,7 +80,7 @@ export interface RecipeData {
 
 export interface DocumentSummary {
   doc_title: string;
-  doc_category: "สลิปโอนเงิน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป";
+  doc_category: "สลิปโอนเงิน" | "สลิปเงินเดือน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป";
   summary: string;
   amount?: number | null;
   due_date?: string | null;
@@ -85,28 +88,40 @@ export interface DocumentSummary {
 }
 
 /**
- * Phase 1 & 6 & 7: สแกนสลิปโอนเงิน / ใบเสร็จ / เอกสาร PDF
+ * Phase 1 & 6 & 7: สแกนสลิปโอนเงิน / ใบเสร็จ / สลิปเงินเดือน / เอกสาร PDF
  */
 export async function parseSlipDocument(
   fileBuffer: Buffer,
   mimeType: string = "image/jpeg"
 ): Promise<SlipData> {
   const prompt = `
-    คุณคือผู้เชี่ยวชาญด้าน OCR สลิปโอนเงิน ใบเสร็จ และเอกสารการเงินของประเทศไทย
+    คุณคือผู้เชี่ยวชาญด้าน OCR ตรวจสอบเอกสารการเงิน สลิปโอนเงิน ใบเสร็จ และสลิปเงินเดือนของประเทศไทย
     โปรดวิเคราะห์รูปภาพหรือเอกสาร PDF นี้ และส่งคืนผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
     {
-      "is_slip": boolean (true ถ้าเป็นสลิปโอนเงิน บิล ใบเสร็จชำระเงิน หรือใบกำกับภาษี, false ถ้าไม่ใช่),
-      "amount": number (ยอดเงินเฉพาะตัวเลขทศนิยม เช่น 350.00),
-      "bank": string (ชื่อธนาคาร เช่น "KBANK", "SCB", "KTB", "BBL", "PromptPay", "GSB" หรือ "ใบเสร็จทั่วไป"),
-      "category": string (หมวดหมู่: "อาหาร", "ค่าน้ำค่าไฟ", "ของใช้ในบ้าน", "สุขภาพ/ยา", "การศึกษา/ลูก", "ช้อปปิ้ง", หรือ "ทั่วไป"),
+      "is_slip": boolean (true ถ้าเป็นเอกสารการเงิน สลิปโอนเงิน บิล หรือสลิปเงินเดือน, false ถ้าไม่ใช่),
+      "doc_type": "expense_slip" | "payslip" | "bill" | "tax_doc" | "other",
+      "is_expense": boolean (true เฉพาะเมื่อเป็นรายการจ่ายเงิน/โอนออก, false ถ้าเป็นสลิปเงินเดือน รายรับ หรือบิลรอชำระ),
+      "title": string (เช่น "สลิปโอนเงิน KBANK", "สลิปเงินเดือน ก.ย. 69", "ใบแจ้งค่าไฟฟ้า"),
+      "amount": number (ยอดเงินเฉพาะตัวเลข เช่น 350.00 หรือยอดสุทธิเงินเดือน เช่น 68250.62),
+      "bank": string (ชื่อธนาคาร หรือชื่อบริษัทนายจ้างที่จ่ายเงิน),
+      "category": string ("เงินเดือน/รายรับ", "อาหาร", "ค่าน้ำค่าไฟ", "ของใช้ในบ้าน", "สุขภาพ/ยา", "การศึกษา/ลูก", "ช้อปปิ้ง", หรือ "ทั่วไป"),
       "date": "YYYY-MM-DD HH:mm:ss" (วันเวลาที่ทำรายการ หากไม่พบให้ใช้วันนี้),
-      "sender_name": string (ชื่อผู้โอน),
-      "receiver_name": string (ชื่อผู้รับ),
+      "sender_name": string (ชื่อผู้โอน หรือบริษัทนายจ้าง),
+      "receiver_name": string (ชื่อผู้รับ หรือพนักงาน),
       "note": string (บันทึกช่วยจำถ้ามี),
-      "transaction_ref": string (เลขอ้างอิงธุรกรรม/รหัสสลิป เช่น 2026093012345678 หากไม่พบให้เว้นว่าง),
+      "transaction_ref": string (เลขอ้างอิงธุรกรรม/รหัสสลิป หากไม่พบให้เว้นว่าง),
       "is_tax_deductible": boolean (true ถ้าเป็นค่ารักษาพยาบาล เบี้ยประกัน เงินบริจาค หรือใบเสร็จที่ลดหย่อนภาษีได้),
       "tax_category": string ("ค่ารักษาพยาบาล", "เบี้ยประกัน", "เงินบริจาค", "ช้อปดีมีคืน", หรือ null)
     }
+
+    ⚠️ กฎเหล็กในการจำแนกประเภท:
+    - หากเป็น "สลิปเงินเดือน", "ใบแจ้งเงินเดือน", "Pay Slip", "Salary Slip", "หนังสือรับรองการหักภาษี ณ ที่จ่าย", หรือเอกสารรายได้:
+      -> doc_type ต้องเป็น "payslip"
+      -> is_expense ต้องเป็น false (เด็ดขาด! เพราะเป็นเงินเดือน/รายรับ ห้ามจัดเป็นรายจ่าย)
+      -> category ต้องเป็น "เงินเดือน/รายรับ"
+    - หากเป็น "สลิปโอนเงินสำเร็จ", "ใบเสร็จรับเงินชำระค่าสินค้า/บริการ", "ใบเสร็จ 7-Eleven", "สลิปพร้อมเพย์โอนออก":
+      -> doc_type ต้องเป็น "expense_slip"
+      -> is_expense ต้องเป็น true
   `;
 
   try {

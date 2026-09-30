@@ -7,6 +7,8 @@ import {
   buildRecipeFlexMessage,
   buildDocumentSummaryFlexMessage,
   buildDashboardLinkFlexMessage,
+  buildBatchSummaryFlexMessage,
+  buildFamilySettingsFlexMessage,
 } from "../src/lib/line";
 
 describe("LINE Flex Message Builders", () => {
@@ -108,6 +110,50 @@ describe("LINE Flex Message Builders", () => {
     expect(flex.header.contents[1].text).toContain("แดชบอร์ดรายจ่ายของบ้าน");
     expect(flex.footer.contents[0].action.uri).toBe(url);
   });
+
+  it("should generate a valid Batch Summary Flex Message", () => {
+    const files = [
+      {
+        fileName: "20260930_สลิปเงินเดือน_พนักงาน_68250.62บาท.pdf",
+        fileType: "pdf",
+        docCategory: "payslip",
+        docTitle: "สลิปเงินเดือน (CHINAWAT ✨)",
+        amount: "68250.62",
+        isExpense: false,
+      },
+      {
+        fileName: "20260930_สลิป_KBANK_350บาท.jpg",
+        fileType: "image",
+        docCategory: "expense_slip",
+        docTitle: "สลิปโอนเงิน KBANK",
+        amount: "350.00",
+        isExpense: true,
+      },
+    ];
+
+    const flex = buildBatchSummaryFlexMessage(files, "testGroup123");
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toContain("สำรองไฟล์เข้า Google Drive สำเร็จ");
+    expect((flex.body.contents[0] as any).contents[0].text).toContain("รูปภาพ 1 รูป PDF 1 ไฟล์");
+    expect(flex.footer.contents[0].action.uri).toContain("1WinPhipplh6_xISDEtE6UIffrfKCUt7K");
+  });
+
+  it("should generate a valid Family Settings Flex Message", () => {
+    const flex = buildFamilySettingsFlexMessage({
+      familyName: "บ้านคนกลม 88",
+      familyPin: "1234",
+      adminName: "คุณพ่อ",
+      driveFolderId: "test_drive_folder_123",
+      subscriptionPlan: "pro",
+    });
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toBe("บ้านคนกลม 88");
+    expect((flex.body as any).contents[0].contents[1].text).toContain("ตั้งแล้ว (4 หลัก)");
+    expect((flex.body as any).contents[3].contents[1].text).toBe("PRO");
+  });
 });
+
 
 

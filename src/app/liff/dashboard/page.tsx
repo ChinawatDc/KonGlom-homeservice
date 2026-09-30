@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { db } from "@/db";
-import { expenses } from "@/db/schema";
+import { expenses, familySettings } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import {
   DollarSign,
@@ -9,12 +9,16 @@ import {
   Receipt,
   ExternalLink,
   ArrowRightLeft,
-  ShieldAlert,
   Sparkles,
   ArrowLeft,
   MessageSquare,
   Lock,
+  KeyRound,
+  ShieldCheck,
+  AlertCircle,
+  PiggyBank,
 } from "lucide-react";
+import { DeleteExpenseButton } from "./DeleteExpenseButton";
 
 export const dynamic = "force-dynamic";
 
@@ -22,16 +26,33 @@ interface DashboardPageProps {
   searchParams: Promise<{
     groupId?: string;
     demo?: string;
+    pin?: string;
   }>;
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const { groupId, demo } = await searchParams;
+  const { groupId, demo, pin } = await searchParams;
   const isDemo = demo === "true";
 
   // =========================================================================
-  // 1. กรณีคนนอกเข้าผ่าน URL ตรง โดยไม่มี groupId และไม่ได้อยู่ในโหมด Demo
-  //    -> แสดงหน้าล็อกความปลอดภัย (Security Gate) เพื่อรักษาความเป็นส่วนตัว
+  // 1. ดึงข้อมูลการตั้งค่าบ้าน (Multi-Tenant Family Settings)
+  // =========================================================================
+  let familyInfo: any = null;
+  if (groupId) {
+    try {
+      const res = await db
+        .select()
+        .from(familySettings)
+        .where(eq(familySettings.groupId, groupId))
+        .limit(1);
+      familyInfo = res[0] || null;
+    } catch (err) {
+      console.error("Error querying familySettings:", err);
+    }
+  }
+
+  // =========================================================================
+  // 2. Security Gate: กรณีเปิดผ่าน URL ตรงโดยไม่มี groupId และไม่ใช่โหมด Demo
   // =========================================================================
   if (!groupId && !isDemo) {
     return (
@@ -92,7 +113,99 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   // =========================================================================
-  // 2. ดึงข้อมูลจริง (แยกตาม groupId) หรือโหลดข้อมูลจำลอง (Demo Mode)
+  // 3. PIN Lock Screen: ตรวจสอบความถูกต้องของรหัส PIN (Pillar 1)
+  // =========================================================================
+  const hasPinConfigured = Boolean(familyInfo?.familyPin);
+  const isPinValid = hasPinConfigured && pin === familyInfo.familyPin;
+
+  if (groupId && !isDemo && hasPinConfigured && !isPinValid) {
+    const isIncorrectAttempt = Boolean(pin);
+    const familyDisplayName = familyInfo?.familyName || "ครอบครัวคนกลม";
+
+    return (
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800/90 border border-slate-700/80 rounded-3xl p-6 sm:p-8 backdrop-blur-xl shadow-2xl text-center">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mx-auto mb-5 shadow-lg">
+            <KeyRound className="w-8 h-8" />
+          </div>
+
+          <span className="text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full uppercase tracking-wider">
+            Protected Family Vault
+          </span>
+
+          <h1 className="text-xl sm:text-2xl font-bold text-white mt-3 mb-1">
+            {familyDisplayName}
+          </h1>
+          <p className="text-xs text-slate-400 mb-6">
+            ป้อนรหัส PIN ประจำบ้านเพื่อเข้าถึงข้อมูลรายจ่าย
+          </p>
+
+          {isIncorrectAttempt && (
+            <div className="flex items-center gap-2 p-3 mb-5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-left">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>รหัส PIN ไม่ถูกต้อง กรุณาตรวจสอบและลองใหม่อีกครั้ง</span>
+            </div>
+          )}
+
+          <form method="GET" action="/liff/dashboard" className="space-y-4 mb-6">
+            <input type="hidden" name="groupId" value={groupId} />
+            <div>
+              <input
+                type="password"
+                name="pin"
+                maxLength={20}
+                required
+                autoFocus
+                placeholder="••••"
+                className="w-full text-center tracking-[0.4em] text-2xl font-mono py-3.5 px-4 rounded-2xl bg-slate-900 border border-slate-700 text-white placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition-all duration-200"
+            >
+              ปลดล็อกเข้าสู่แดชบอร์ด
+            </button>
+          </form>
+
+          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 text-left mb-6 text-xs text-slate-400 leading-relaxed">
+            <p className="font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+              <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+              ยังไม่มีรหัสหรือลืมรหัส PIN?
+            </p>
+            <p>
+              สมาชิกสามารถดูหรือตั้งรหัสใหม่ได้โดยพิมพ์ในกลุ่มแชท LINE:
+            </p>
+            <code className="block mt-1.5 bg-slate-800 p-2 rounded-lg text-emerald-300 font-mono text-center">
+              @บอท ตั้งรหัส [PIN ใหม่]
+            </code>
+          </div>
+
+          <div className="space-y-2">
+            <Link
+              href="/liff/dashboard?demo=true"
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs transition"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              ดูหน้าตาตัวอย่าง (Interactive Demo)
+            </Link>
+
+            <Link
+              href="/"
+              className="w-full inline-flex items-center justify-center gap-2 py-2 px-4 rounded-xl text-slate-400 hover:text-slate-200 font-medium text-xs transition"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              กลับหน้าแรก
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 4. ดึงข้อมูลจริง (แยกตาม groupId) หรือโหลดข้อมูลจำลอง (Demo Mode)
   // =========================================================================
   let recentExpenses: any[] = [];
 
@@ -174,6 +287,12 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const memberCount = Math.max(1, memberNames.length);
   const averagePerMember = totalAmount / memberCount;
 
+  // งบประมาณรายเดือน (ถ้ามีการตั้งไว้)
+  const monthlyBudget = familyInfo?.monthlyBudget ? parseFloat(familyInfo.monthlyBudget) : 0;
+  const budgetPercentage = monthlyBudget > 0 ? Math.min(100, (totalAmount / monthlyBudget) * 100) : 0;
+
+  const familyDisplayName = familyInfo?.familyName || (isDemo ? "ครอบครัวตัวอย่าง (Demo)" : "ครอบครัวคนกลม");
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Top Banner สำหรับโหมด Demo */}
@@ -190,16 +309,33 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       {/* Main Container */}
       <div className="max-w-2xl mx-auto px-4 py-6 pb-20">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-start justify-between mb-6">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              {isDemo ? "Demo Family Vault" : "Private Family Vault"}
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-semibold">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                {familyDisplayName}
+              </span>
+
+              {hasPinConfigured && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[10px] font-medium">
+                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                  PIN Protected
+                </span>
+              )}
+
+              {!hasPinConfigured && !isDemo && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium">
+                  💡 แนะนำ: พิมพ์ @บอท ตั้งรหัส ใน LINE เพื่อล็อค
+                </span>
+              )}
             </div>
-            <h1 className="text-2xl font-extrabold text-slate-900 mt-1 tracking-tight">
+
+            <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">
               📊 รายจ่ายกองกลางครอบครัว
             </h1>
           </div>
+
           <div className="text-right">
             <p className="text-xs text-slate-400">อัปเดตล่าสุด</p>
             <p className="text-xs font-medium text-slate-600">
@@ -237,6 +373,29 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
             <span className="text-[11px] text-slate-400">คำนวณจาก {memberCount} สมาชิก</span>
           </div>
         </div>
+
+        {/* Monthly Budget Progress (ถ้ามีการตั้งงบไว้) */}
+        {monthlyBudget > 0 && (
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm mb-6">
+            <div className="flex items-center justify-between text-xs mb-2">
+              <span className="font-semibold text-slate-700 flex items-center gap-1.5">
+                <PiggyBank className="w-4 h-4 text-amber-500" />
+                งบประมาณรายเดือน
+              </span>
+              <span className="text-slate-500">
+                ฿{totalAmount.toLocaleString("th-TH")} / ฿{monthlyBudget.toLocaleString("th-TH")} ({budgetPercentage.toFixed(1)}%)
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  budgetPercentage > 90 ? "bg-rose-500" : budgetPercentage > 75 ? "bg-amber-500" : "bg-emerald-500"
+                }`}
+                style={{ width: `${budgetPercentage}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Settle Up Calculation */}
         <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-5 rounded-2xl mb-6 shadow-md">
@@ -342,6 +501,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
+                    )}
+                    {!isDemo && groupId && (
+                      <DeleteExpenseButton
+                        expenseId={item.id}
+                        groupId={groupId}
+                        pin={pin}
+                        expenseTitle={`${item.category} ฿${parseFloat(item.amount).toLocaleString("th-TH")}`}
+                      />
                     )}
                   </div>
                 </div>

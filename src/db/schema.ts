@@ -104,3 +104,41 @@ export const pantryItems = pgTable("pantry_items", {
   expiryDate: timestamp("expiry_date"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// =========================================================================
+// Phase 8: Batch Ingestion & Debounced Smart Vault (คลังไฟล์ & ระบบสรุปรวม)
+// =========================================================================
+export const uploadedFilesQueue = pgTable("uploaded_files_queue", {
+  id: serial("id").primaryKey(),
+  groupId: varchar("group_id", { length: 100 }).notNull(),
+  lineUserId: varchar("line_user_id", { length: 100 }),
+  userName: varchar("user_name", { length: 150 }),
+  fileName: varchar("file_name", { length: 255 }).notNull(),
+  fileType: varchar("file_type", { length: 20 }).notNull(), // 'image' | 'pdf'
+  docCategory: varchar("doc_category", { length: 50 }),     // 'expense_slip', 'payslip', 'bill', 'tax_doc', 'medical', 'general'
+  docTitle: varchar("doc_title", { length: 255 }),
+  amount: numeric("amount", { precision: 12, scale: 2 }),
+  isExpense: boolean("is_expense").default(false),
+  driveFileId: varchar("drive_file_id", { length: 150 }),
+  driveUrl: text("drive_url"),
+  folderPath: varchar("folder_path", { length: 150 }),
+  status: varchar("status", { length: 20 }).default("pending").notNull(), // 'pending' | 'summarized' | 'action_taken'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// =========================================================================
+// Phase 9: Multi-Family SaaS & Security (ตั้งรหัส PIN บ้าน, บทบาท, ไดรฟ์แยกบ้าน)
+// =========================================================================
+export const familySettings = pgTable("family_settings", {
+  groupId: varchar("group_id", { length: 100 }).primaryKey(),
+  familyName: varchar("family_name", { length: 150 }).default("ครอบครัวคนกลม").notNull(),
+  familyPin: varchar("family_pin", { length: 20 }),            // รหัส PIN 4-6 หลัก
+  adminLineUserId: varchar("admin_line_user_id", { length: 100 }), // หัวหน้าบ้าน / ผู้ดูแล
+  driveFolderId: varchar("drive_folder_id", { length: 150 }),  // โฟลเดอร์ Google Drive แยกบ้าน
+  subscriptionPlan: varchar("subscription_plan", { length: 50 }).default("free").notNull(), // 'free', 'pro', 'enterprise'
+  monthlyBudget: numeric("monthly_budget", { precision: 12, scale: 2 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+
