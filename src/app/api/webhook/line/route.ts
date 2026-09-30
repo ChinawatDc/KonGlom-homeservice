@@ -23,17 +23,44 @@ import { uploadImageToDrive } from "@/lib/google-drive";
 
 export const maxDuration = 60; // รองรับประมวลผล Multimodal AI
 
+export async function GET() {
+  return NextResponse.json({
+    status: "active",
+    name: "KonGlom-homeservice LINE Webhook",
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
     const events: any[] = body.events || [];
 
     for (const event of events) {
-      if (event.type !== "message") continue;
-
       const replyToken = event.replyToken;
       const groupId = event.source?.groupId || event.source?.roomId || event.source?.userId || "unknown_group";
       const userId = event.source?.userId;
+
+      // =========================================================================
+      // จัดการเมื่อบอทถูกเชิญเข้ากลุ่ม (Join) หรือมีคนแอดเพื่อน (Follow)
+      // =========================================================================
+      if (event.type === "join" || event.type === "follow") {
+        if (replyToken) {
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "text",
+                text: "🏡 สวัสดีครับทุกคน! ผม 'คนกลม' ผู้ช่วยประจำบ้าน ยินดีที่ได้มารับใช้ทุกคนครับ\n\n📌 สิ่งที่ผมช่วยดูแลในกลุ่มนี้:\n1. 💸 สแกนสลิปเงิน: ส่งรูปสลิปเข้ามา ผมจะอ่านยอดเงิน จดบันทึก และสำรองไฟล์เข้า Google Drive ให้อัตโนมัติ\n2. 📊 เคลียร์เงินกองกลาง: พิมพ์ \"@บอท เคลียร์เงิน\" เพื่อดูสรุปยอดและวิธีหาร\n3. ⏰ เตือนความจำ: ส่งคลิปเสียงพูด หรือพิมพ์ \"@บอท เตือน [เรื่อง] [วันเวลา]\"\n4. 🍳 เมนูอาหาร: พิมพ์ \"@บอท กินไรดี\" หรือส่งรูปของในตู้เย็น\n5. 💊 เช็กยา/ข่าวสุขภาพ: ส่งรูปซองยา หรือพิมพ์ \"@บอท เช็กข่าว [ข้อความ]\"\n\nลองส่งสลิปหรือพิมพ์ \"@บอท\" ดูได้เลยครับ!",
+              },
+            ],
+          });
+        }
+        continue;
+      }
+
+      if (event.type !== "message") continue;
+
       const message = event.message;
 
       // =========================================================================
@@ -292,6 +319,28 @@ export async function POST(req: Request) {
           await lineClient.replyMessage({
             replyToken,
             messages: [{ type: "text", text: replyText }],
+          });
+          continue;
+        }
+
+        // 3.6 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
+        if (
+          text === "@บอท" ||
+          text === "บอท" ||
+          text === "เมนู" ||
+          text === "คู่มือ" ||
+          text.includes("ช่วยอะไรได้บ้าง") ||
+          text.includes("วิธีใช้") ||
+          text.startsWith("@บอท")
+        ) {
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "text",
+                text: "🏡 [คนกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป ➔ บันทึกรายจ่าย + เก็บเข้า Google Drive ทันที\n2. 📊 พิมพ์ \"@บอท เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. ⏰ พิมพ์ \"@บอท เตือน [เรื่อง] [วันเวลา]\" หรือส่งคลิปเสียง ➔ บันทึกนัดหมาย\n4. 🍳 พิมพ์ \"@บอท กินไรดี\" หรือส่งรูปของในตู้เย็น ➔ แนะนำเมนูอาหาร\n5. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n6. 🩺 พิมพ์ \"@บอท เช็กข่าว [ข้อความ]\" ➔ ตรวจข้อเท็จจริงทางการแพทย์\n7. 🛠 พิมพ์ \"@บอท ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
+              },
+            ],
           });
           continue;
         }
