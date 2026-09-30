@@ -3,12 +3,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const apiKey = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
-// ลิสต์โมเดลที่รองรับตามลำดับความพร้อมใช้งาน เพื่อป้องกัน Error 503 (High Demand)
+// ลิสต์โมเดลที่รองรับตามลำดับความพร้อมใช้งานและ latency ต่ำที่สุด เพื่อป้องกัน Error 503 (High Demand)
 const CANDIDATE_MODELS = [
-  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-flash-lite-latest",
   "gemini-3.5-flash",
   "gemini-3.8-flash",
-  "gemini-flash-lite-latest",
+  "gemini-3.7-flash",
 ];
 
 /**
