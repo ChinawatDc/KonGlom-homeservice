@@ -76,3 +76,30 @@ git commit -m "feat(ocr): add Gemini 1.5 Flash parser"
 # 4. Push ขึ้น GitHub
 git push -u origin feature/phase-1-slip-ocr
 ```
+
+---
+
+## 🛡 6. กฎ Quality Gate: Test & Build ต้องผ่าน 100% ก่อน Merge เข้า `main`
+
+เพื่อรักษาเสถียรภาพของระบบบน Production โครงการนี้บังคับใช้กฎ **ห้ามนำโค้ดที่ Build ไม่ผ่าน หรือ Test ไม่ผ่าน เข้าสู่ `main` โดยเด็ดขาด**:
+
+### 1. การตรวจสอบอัตโนมัติในเครื่อง (Local Pre-Push Hook)
+มี Git hook อยู่ที่ `.githooks/pre-push` ซึ่งจะดักจับทุกครั้งที่มีการ Push สู่ `main`:
+- สั่งรัน `npm run check` อัตโนมัติ (`typecheck` + `test` + `build`)
+- หากขั้นตอนใดขั้นตอนหนึ่งมี Error การ Push จะถูกยกเลิกทันที
+
+### 2. การตรวจสอบบนคลาวด์ (GitHub Actions CI)
+มี Workflow อยู่ที่ `.github/workflows/ci.yml` ทำงานบนทุก Pull Request ที่มุ่งสู่ `main`:
+- ตรวจสอบ Type ด้วย `npm run typecheck`
+- รัน Automated Unit Tests ด้วย `npm test` (Vitest)
+- รัน Production Build ด้วย `npm run build`
+
+### 3. การตั้งค่า Branch Protection บน GitHub (แนะนำ)
+1. ไปที่ GitHub Repository -> **Settings** -> **Branches**
+2. กด **Add branch ruleset** หรือ **Add rule**
+3. Branch name pattern: `main`
+4. ติ๊กเลือก:
+   - ✅ **Require a pull request before merging**
+   - ✅ **Require status checks to pass before merging** -> ค้นหาและเลือก `Typecheck, Test & Build Gate`
+   - ✅ **Do not allow bypassing the above settings**
+
