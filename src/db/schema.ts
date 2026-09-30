@@ -11,6 +11,9 @@ export const expenses = pgTable("expenses", {
   amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
   category: varchar("category", { length: 50 }).notNull(), // 'อาหาร', 'ค่าน้ำค่าไฟ', 'ของใช้ในบ้าน', 'สุขภาพ', 'ทั่วไป'
   bankName: varchar("bank_name", { length: 50 }),          // 'KBANK', 'SCB', 'KTB', 'PROMPTPAY', etc.
+  transactionRef: varchar("transaction_ref", { length: 100 }), // Phase 6: เลขอ้างอิงสลิปสำหรับป้องกันการส่งซ้ำ
+  isTaxDeductible: boolean("is_tax_deductible").default(false), // Phase 7: หมวดลดหย่อนภาษี
+  taxCategory: varchar("tax_category", { length: 50 }),        // Phase 7: 'medical', 'insurance', 'parent_care', 'donation'
   transactionDate: timestamp("transaction_date").defaultNow(),
   driveFileId: varchar("drive_file_id", { length: 150 }),
   driveUrl: text("drive_url"),                             // Direct link to Google Drive

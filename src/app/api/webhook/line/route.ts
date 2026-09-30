@@ -13,6 +13,7 @@ import {
   buildRecipeFlexMessage,
 } from "@/lib/line";
 import {
+  parseSlipDocument,
   parseSlipImage,
   parseVoiceOrTextReminder,
   parseMedicineLabel,
@@ -64,27 +65,61 @@ export async function POST(req: Request) {
       const message = event.message;
 
       // =========================================================================
-      // 1. จัดการรูปภาพ (Phase 1: สลิปเงิน / Phase 4: ซองยา / Phase 5: ตู้เย็น)
+      // 1. จัดการรูปภาพ & เอกสารไฟล์ (PDF สลิป/บิล / Phase 6: ตรวจสลิปซ้ำ / Phase 4: ซองยา)
       // =========================================================================
-      if (message.type === "image") {
+      if (message.type === "image" || message.type === "file") {
         try {
-          // ดึงภาพจาก LINE
+          const isPdf = message.type === "file" && (message.fileName?.toLowerCase().endsWith(".pdf") || true);
+          const mimeType = isPdf ? "application/pdf" : "image/jpeg";
+          const fileName = message.type === "file" 
+            ? (message.fileName || `document_${Date.now()}.pdf`)
+            : `konglom_${Date.now()}.jpg`;
+
+          // ดึงไฟล์/ภาพจาก LINE
           const stream = await lineBlobClient.getMessageContent(message.id);
           const chunks: any[] = [];
           for await (const chunk of stream as any) chunks.push(Buffer.from(chunk));
-          const imageBuffer = Buffer.concat(chunks);
+          const fileBuffer = Buffer.concat(chunks);
 
-          // ทำงานคู่ขนาน: OCR สลิป + อัปโหลด Google Drive
+          // ทำงานคู่ขนาน: OCR สลิป/เอกสาร + อัปโหลด Google Drive
           const [slipData, driveUpload] = await Promise.all([
-            parseSlipImage(imageBuffer),
-            uploadImageToDrive(imageBuffer, `konglom_${Date.now()}.jpg`),
+            parseSlipDocument(fileBuffer, mimeType),
+            uploadImageToDrive(fileBuffer, fileName, mimeType),
           ]);
 
-          // ถ้าเป็นสลิปโอนเงิน / ใบเสร็จ (Phase 1)
+          // ถ้าเป็นสลิปโอนเงิน / ใบเสร็จ / บิล PDF (Phase 1, 6, 7)
           if (slipData.is_slip && slipData.amount) {
             const senderName = await getSenderDisplayName(groupId, userId);
 
-            // บันทึก DB
+            // Phase 6: ตรวจสอบสลิปซ้ำ (Duplicate Prevention)
+            if (slipData.transaction_ref) {
+              const existing = await db
+                .select()
+                .from(expenses)
+                .where(
+                  and(
+                    eq(expenses.groupId, groupId),
+                    eq(expenses.transactionRef, slipData.transaction_ref)
+                  )
+                )
+                .limit(1);
+
+              if (existing.length > 0) {
+                const prev = existing[0];
+                await lineClient.replyMessage({
+                  replyToken,
+                  messages: [
+                    {
+                      type: "text",
+                      text: `⚠️ [ตรวจพบสลิปซ้ำ]\nสลิปยอด ฿${Number(slipData.amount).toLocaleString("th-TH")} (รหัส: ${slipData.transaction_ref})\nเคยถูกบันทึกไปแล้วเมื่อ ${prev.transactionDate?.toLocaleString("th-TH")} โดย "${prev.userName || "สมาชิกในบ้าน"}" ครับ!`,
+                    },
+                  ],
+                });
+                continue;
+              }
+            }
+
+            // บันทึก DB พร้อมข้อมูลลดหย่อนภาษี (Phase 7)
             await db.insert(expenses).values({
               groupId,
               lineUserId: userId || "unknown",
@@ -92,6 +127,9 @@ export async function POST(req: Request) {
               amount: slipData.amount.toString(),
               category: slipData.category || "ทั่วไป",
               bankName: slipData.bank || "PromptPay",
+              transactionRef: slipData.transaction_ref,
+              isTaxDeductible: slipData.is_tax_deductible || false,
+              taxCategory: slipData.tax_category,
               transactionDate: slipData.date ? new Date(slipData.date) : new Date(),
               driveFileId: driveUpload?.fileId,
               driveUrl: driveUpload?.webViewLink,
@@ -112,48 +150,72 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // ถ้าไม่ใช่สลิป ลองตรวจว่าเป็นซองยาหรือไม่ (Phase 4)
-          const medicineData = await parseMedicineLabel(imageBuffer);
-          if (medicineData.is_medicine && medicineData.medicine_name) {
-            await db.insert(medicines).values({
-              groupId,
-              medicineName: medicineData.medicine_name,
-              indication: medicineData.indication,
-              dosageInstructions: medicineData.dosage_instructions,
-              warnings: medicineData.warnings,
-              imageUrl: driveUpload?.webViewLink,
-            });
+          // ถ้าไม่ใช่สลิป ลองตรวจว่าเป็นซองยาหรือไม่ (เฉพาะภาพ)
+          if (message.type === "image") {
+            const medicineData = await parseMedicineLabel(fileBuffer);
+            if (medicineData.is_medicine && medicineData.medicine_name) {
+              await db.insert(medicines).values({
+                groupId,
+                medicineName: medicineData.medicine_name,
+                indication: medicineData.indication,
+                dosageInstructions: medicineData.dosage_instructions,
+                warnings: medicineData.warnings,
+                imageUrl: driveUpload?.webViewLink,
+              });
 
+              await lineClient.replyMessage({
+                replyToken,
+                messages: [
+                  {
+                    type: "flex",
+                    altText: `ข้อมูลยา: ${medicineData.medicine_name}`,
+                    contents: buildMedicineFlexMessage(medicineData) as any,
+                  },
+                ],
+              });
+              continue;
+            }
+
+            // ถ้าไม่ใช่ซองยา ลองดูว่าเป็นรูปของในตู้เย็นหรือไม่
+            const recipes = await suggestFridgeRecipes(fileBuffer);
+            if (recipes.recommended_recipes.length > 0) {
+              await lineClient.replyMessage({
+                replyToken,
+                messages: [
+                  {
+                    type: "flex",
+                    altText: "แนะนำเมนูอาหารมื้อนี้",
+                    contents: buildRecipeFlexMessage(recipes) as any,
+                  },
+                ],
+              });
+              continue;
+            }
+          }
+
+          // ถ้าเป็นไฟล์เอกสารหรือรูปที่ไม่ใช่สลิป ตอบแจ้งเตือนให้ผู้ใช้ทราบ (ไม่เงียบหาย!)
+          const fileNote = message.type === "file" 
+            ? `📄 ได้รับเอกสาร "${fileName}" และสำรองเข้า Google Drive แล้ว แต่ไม่พบข้อมูลสลิปหรือบิลการเงินครับ`
+            : `📸 ได้รับรูปภาพแล้วครับ แต่ระบบวิเคราะห์แล้วไม่พบว่าเป็นสลิปเงินหรือซองยา\n\n💡 พิมพ์ "@บอท" เพื่อดูคำสั่งที่ใช้งานได้ครับ`;
+
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [{ type: "text", text: fileNote }],
+          });
+          continue;
+        } catch (err: any) {
+          console.error("Error processing media event:", err);
+          try {
             await lineClient.replyMessage({
               replyToken,
               messages: [
                 {
-                  type: "flex",
-                  altText: `ข้อมูลยา: ${medicineData.medicine_name}`,
-                  contents: buildMedicineFlexMessage(medicineData) as any,
+                  type: "text",
+                  text: `⚠️ ได้รับไฟล์แล้วแต่เกิดข้อผิดพลาดในการประมวลผล กรุณาลองส่งใหม่อีกครั้งครับ (${err.message || "Error"})`,
                 },
               ],
             });
-            continue;
-          }
-
-          // ถ้าไม่ใช่ซองยา ลองดูว่าเป็นรูปของในตู้เย็นหรือไม่ (Phase 5)
-          const recipes = await suggestFridgeRecipes(imageBuffer);
-          if (recipes.recommended_recipes.length > 0) {
-            await lineClient.replyMessage({
-              replyToken,
-              messages: [
-                {
-                  type: "flex",
-                  altText: "แนะนำเมนูอาหารมื้อนี้",
-                  contents: buildRecipeFlexMessage(recipes) as any,
-                },
-              ],
-            });
-            continue;
-          }
-        } catch (err) {
-          console.error("Error processing image event:", err);
+          } catch {}
         }
       }
 

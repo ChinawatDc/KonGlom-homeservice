@@ -12,6 +12,9 @@ export interface SlipData {
   sender_name?: string;
   receiver_name?: string;
   note?: string;
+  transaction_ref?: string;
+  is_tax_deductible?: boolean;
+  tax_category?: string;
 }
 
 export interface ReminderData {
@@ -41,26 +44,32 @@ export interface RecipeData {
 }
 
 /**
- * Phase 1: สแกนสลิปโอนเงิน / ใบเสร็จ
+ * Phase 1 & 6 & 7: สแกนสลิปโอนเงิน / ใบเสร็จ / เอกสาร PDF
  */
-export async function parseSlipImage(imageBuffer: Buffer): Promise<SlipData> {
+export async function parseSlipDocument(
+  fileBuffer: Buffer,
+  mimeType: string = "image/jpeg"
+): Promise<SlipData> {
   const model = genAI.getGenerativeModel({
     model: "gemini-3.8-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
   const prompt = `
-    คุณคือผู้เชี่ยวชาญด้าน OCR สลิปโอนเงินและใบเสร็จของประเทศไทย
-    โปรดวิเคราะห์รูปภาพและส่งคืนผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
+    คุณคือผู้เชี่ยวชาญด้าน OCR สลิปโอนเงิน ใบเสร็จ และเอกสารการเงินของประเทศไทย
+    โปรดวิเคราะห์รูปภาพหรือเอกสาร PDF นี้ และส่งคืนผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
     {
-      "is_slip": boolean (true ถ้าเป็นสลิปโอนเงิน บิล หรือใบเสร็จชำระเงิน, false ถ้าไม่ใช่),
+      "is_slip": boolean (true ถ้าเป็นสลิปโอนเงิน บิล ใบเสร็จชำระเงิน หรือใบกำกับภาษี, false ถ้าไม่ใช่),
       "amount": number (ยอดเงินเฉพาะตัวเลขทศนิยม เช่น 350.00),
       "bank": string (ชื่อธนาคาร เช่น "KBANK", "SCB", "KTB", "BBL", "PromptPay", "GSB" หรือ "ใบเสร็จทั่วไป"),
       "category": string (หมวดหมู่: "อาหาร", "ค่าน้ำค่าไฟ", "ของใช้ในบ้าน", "สุขภาพ/ยา", "การศึกษา/ลูก", "ช้อปปิ้ง", หรือ "ทั่วไป"),
       "date": "YYYY-MM-DD HH:mm:ss" (วันเวลาที่ทำรายการ หากไม่พบให้ใช้วันนี้),
       "sender_name": string (ชื่อผู้โอน),
       "receiver_name": string (ชื่อผู้รับ),
-      "note": string (บันทึกช่วยจำถ้ามี)
+      "note": string (บันทึกช่วยจำถ้ามี),
+      "transaction_ref": string (เลขอ้างอิงธุรกรรม/รหัสสลิป เช่น 2026093012345678 หากไม่พบให้เว้นว่าง),
+      "is_tax_deductible": boolean (true ถ้าเป็นค่ารักษาพยาบาล เบี้ยประกัน เงินบริจาค หรือใบเสร็จที่ลดหย่อนภาษีได้),
+      "tax_category": string ("ค่ารักษาพยาบาล", "เบี้ยประกัน", "เงินบริจาค", "ช้อปดีมีคืน", หรือ null)
     }
   `;
 
@@ -68,8 +77,8 @@ export async function parseSlipImage(imageBuffer: Buffer): Promise<SlipData> {
     prompt,
     {
       inlineData: {
-        data: imageBuffer.toString("base64"),
-        mimeType: "image/jpeg",
+        data: fileBuffer.toString("base64"),
+        mimeType: mimeType || "image/jpeg",
       },
     },
   ]);
@@ -77,10 +86,13 @@ export async function parseSlipImage(imageBuffer: Buffer): Promise<SlipData> {
   try {
     return JSON.parse(result.response.text()) as SlipData;
   } catch (err) {
-    console.error("Failed to parse Gemini slip response:", err);
+    console.error("Failed to parse Gemini slip document response:", err);
     return { is_slip: false };
   }
 }
+
+// Backward compatibility alias
+export const parseSlipImage = parseSlipDocument;
 
 /**
  * Phase 3: ถอดความข้อความเสียง / ข้อความเตือนความจำ

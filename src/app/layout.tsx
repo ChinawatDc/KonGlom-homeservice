@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "KonGlom-homeservice (คนกลม โฮมเซอร์วิส)",
-  description: "ผู้ช่วยอัจฉริยะประจำครอบครัวบน LINE",
+  title: "KonGlom HomeService (คนกลม โฮมเซอร์วิส) - ผู้ช่วยอัจฉริยะประจำบ้าน",
+  description: "ผู้ช่วยอัจฉริยะประจำครอบครัวบน LINE สแกนสลิป บิล PDF เคลียร์รายจ่าย เตือนความจำ และดูแลสุขภาพ",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
