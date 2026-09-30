@@ -45,12 +45,15 @@ describe("LINE Flex Message Builders", () => {
       title: "พาคุณยายไปหาหมอ",
       target_person: "ยาย",
       due_date_time: "2026-10-15T09:00:00",
+      has_specific_time: true,
+      notification_rule: "แจ้งเตือนล่วงหน้า 1 ชั่วโมง (เวลา 08:00 น.)",
     };
     const flex = buildReminderFlexMessage(reminder);
 
     expect(flex.type).toBe("bubble");
-    expect(flex.body.contents[0].text).toBe("พาคุณยายไปหาหมอ");
-    expect(flex.body.contents[1].text).toContain("ยาย");
+    expect(flex.header.contents[1].text).toBe("พาคุณยายไปหาหมอ");
+    expect((flex.body as any).contents[2].contents[1].text).toBe("ยาย");
+    expect((flex.body as any).contents[1].contents[1].text).toContain("แจ้งเตือนล่วงหน้า 1 ชั่วโมง");
   });
 
   it("should generate a valid Medicine Flex Message", () => {

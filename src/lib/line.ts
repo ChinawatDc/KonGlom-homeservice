@@ -169,23 +169,82 @@ export function buildSettlementFlexMessage(monthYear: string, total: number, sha
  * Flex Message: แจ้งเตือนนัดหมาย (Phase 3)
  */
 export function buildReminderFlexMessage(reminder: ReminderData) {
+  const thaiMonths = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const rawDateStr = reminder.appointment_date_time || reminder.due_date_time;
+  const appDate = new Date(rawDateStr);
+
+  let dateDisplay = reminder.display_appointment || "";
+  if (!dateDisplay && !isNaN(appDate.getTime())) {
+    const thaiYear = appDate.getFullYear() + 543;
+    const datePart = `${appDate.getDate()} ${thaiMonths[appDate.getMonth()]} ${thaiYear}`;
+    if (reminder.has_specific_time) {
+      const h = String(appDate.getHours()).padStart(2, "0");
+      const m = String(appDate.getMinutes()).padStart(2, "0");
+      dateDisplay = `${datePart} เวลา ${h}:${m} น.`;
+    } else {
+      dateDisplay = `${datePart} (ไม่ระบุเวลา)`;
+    }
+  }
+  if (!dateDisplay) dateDisplay = "ตามที่กำหนด";
+
+  const notifyRule =
+    reminder.notification_rule ||
+    (reminder.has_specific_time ? "แจ้งเตือนก่อนเวลานัด 1 ชั่วโมง" : "แจ้งเตือนตอน 06:00 น. ในวันนัดหมาย");
+
   return {
     type: "bubble",
+    size: "kilo",
     header: {
       type: "box",
       layout: "vertical",
-      backgroundColor: "#F39C12",
+      backgroundColor: "#2563EB",
       contents: [
-        { type: "text", text: "⏰ บันทึกเตือนความจำสำเร็จ", color: "#FFFFFF", weight: "bold", size: "md" },
+        { type: "text", text: "📅 บันทึกนัดหมายสำเร็จ", color: "#DBEAFE", size: "xs", weight: "bold" },
+        { type: "text", text: reminder.title, color: "#FFFFFF", size: "md", weight: "bold", margin: "xs", wrap: true },
       ],
     },
     body: {
       type: "box",
       layout: "vertical",
+      spacing: "sm",
       contents: [
-        { type: "text", text: reminder.title, weight: "bold", size: "lg", wrap: true },
-        { type: "text", text: `สำหรับ: ${reminder.target_person || "ทุกคน"}`, size: "sm", margin: "sm", color: "#555" },
-        { type: "text", text: `เวลานัด: ${reminder.due_date_time.replace("T", " ")}`, size: "sm", color: "#E67E22", weight: "bold" },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "🕒 เวลานัด:", size: "xs", color: "#64748B", flex: 4 },
+            { type: "text", text: dateDisplay, size: "xs", color: "#0F172A", weight: "bold", flex: 8, wrap: true },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "🔔 แจ้งเตือน:", size: "xs", color: "#64748B", flex: 4 },
+            { type: "text", text: notifyRule, size: "xs", color: "#2563EB", weight: "bold", flex: 8, wrap: true },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            { type: "text", text: "👤 สำหรับ:", size: "xs", color: "#64748B", flex: 4 },
+            { type: "text", text: reminder.target_person || "ทุกคนในบ้าน", size: "xs", color: "#334155", flex: 8 },
+          ],
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "text",
+          text: "✨ น้องกลมจะส่งข้อความเตือนในกลุ่มให้อัตโนมัติครับ",
+          size: "xxs",
+          color: "#94A3B8",
+          align: "center",
+        },
       ],
     },
   };

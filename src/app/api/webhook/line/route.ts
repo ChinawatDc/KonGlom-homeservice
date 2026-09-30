@@ -479,12 +479,33 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.2 คำสั่งสั่งเตือนความจำด้วยข้อความ (Phase 3)
-        if (
+        // 3.2 คำสั่งสั่งเตือนความจำ & บันทึกนัดหมาย (Appointments & Smart Reminders)
+        const isAppointmentOrReminder =
           text.startsWith("@กลม เตือน") ||
           text.startsWith("@บอท เตือน") ||
-          text.startsWith("เตือน")
-        ) {
+          text.startsWith("เตือน") ||
+          text.includes("มีนัด") ||
+          text.includes("นัดหมาย") ||
+          text.includes("นัดไป") ||
+          text.includes("นัดเจอ") ||
+          text.includes("นัดหมอ") ||
+          text.includes("นัดช่าง") ||
+          text.includes("อย่าลืม") ||
+          /^(@(กลม|บอท)\s*)?นัด/i.test(text) ||
+          (/^(@(กลม|บอท)\s*)/i.test(text) &&
+            (text.includes("เสาร์") ||
+              text.includes("อาทิตย์") ||
+              text.includes("จันทร์") ||
+              text.includes("อังคาร") ||
+              text.includes("พุธ") ||
+              text.includes("พฤหัส") ||
+              text.includes("ศุกร์") ||
+              text.includes("พรุ่งนี้") ||
+              text.includes("มะรืน") ||
+              text.includes("วันที่") ||
+              text.includes("นัด")));
+
+        if (isAppointmentOrReminder) {
           const reminder = await parseVoiceOrTextReminder({ text });
           if (reminder.is_reminder && reminder.title) {
             await db.insert(reminders).values({
@@ -494,7 +515,7 @@ export async function POST(req: Request) {
               targetPerson: reminder.target_person,
               dueDateTime: new Date(reminder.due_date_time),
               isRecurring: reminder.is_recurring,
-              originalInput: text,
+              originalInput: `${text}${reminder.display_appointment ? ` (นัดหมาย: ${reminder.display_appointment})` : ""}`,
             });
 
             await lineClient.replyMessage({
@@ -502,7 +523,7 @@ export async function POST(req: Request) {
               messages: [
                 {
                   type: "flex",
-                  altText: `เตือนความจำ: ${reminder.title}`,
+                  altText: `📅 บันทึกนัดหมาย: ${reminder.title}`,
                   contents: buildReminderFlexMessage(reminder) as any,
                 },
               ],

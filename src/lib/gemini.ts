@@ -58,7 +58,11 @@ export interface ReminderData {
   is_reminder: boolean;
   title: string;
   target_person?: string;
-  due_date_time: string; // ISO string e.g. "2026-10-15T09:00:00"
+  appointment_date_time?: string; // วันเวลานัดหมายจริง เช่น "2026-10-03T14:00:00"
+  has_specific_time?: boolean;    // true ถ้าระบุเวลาชัดเจน, false ถ้าบอกแค่วัน
+  due_date_time: string;          // ISO string เวลาที่ระบบต้องส่งแจ้งเตือนเข้ากลุ่มจริง (trigger time)
+  notification_rule?: string;     // คำอธิบาย เช่น "แจ้งเตือนตอน 06:00 น. วันนัดหมาย" หรือ "แจ้งเตือนล่วงหน้า 1 ชั่วโมง (เวลา 13:00 น.)"
+  display_appointment?: string;   // ข้อความวันที่นัดหมายสำหรับแสดงผล
   is_recurring?: boolean;
 }
 
@@ -151,23 +155,55 @@ export async function parseSlipDocument(
 export const parseSlipImage = parseSlipDocument;
 
 /**
- * Phase 3: ถอดความข้อความเสียง / ข้อความเตือนความจำ
+ * Phase 3: ถอดความข้อความเสียง / ข้อความเตือนความจำ & วิเคราะห์นัดหมาย
  */
 export async function parseVoiceOrTextReminder(
   input: { text?: string; audioBuffer?: Buffer; mimeType?: string },
-  currentDateTime: string = new Date().toISOString()
+  currentDateTime?: string
 ): Promise<ReminderData> {
+  const now = new Date();
+  const bangkokDateStr = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Bangkok" }).format(now);
+  const bangkokTimeStr = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(now);
+  const bangkokDay = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok", weekday: "long" }).format(now);
+
   const prompt = `
-    คุณคือเลขาประจำครอบครัว งานของคุณคือแกะนัดหมายหรือสิ่งที่ต้องเตือนความจำจากข้อความ
-    เวลาปัจจุบันคือ: ${currentDateTime} (เขตเวลา Asia/Bangkok, GMT+7)
+    คุณคือเลขาและผู้ช่วยประจำครอบครัวอัจฉริยะ (KonGlom น้องกลม)
+    หน้าที่ของคุณคือ วิเคราะห์นัดหมาย กิจกรรม หรือสิ่งที่ต้องเตือนความจำ จากข้อความหรือเสียงพูด
+
+    🕒 ข้อมูลเวลาปัจจุบันของประเทศไทย (Asia/Bangkok, GMT+7):
+    - วันนี้คือ: ${bangkokDay}
+    - วันที่ปัจจุบัน: ${bangkokDateStr}
+    - เวลาปัจจุบัน: ${bangkokTimeStr}
+
+    📌 กฎสำคัญที่สุดในการคำนวณวันและเวลาแจ้งเตือน (กรุณาปฏิบัติตามอย่างเคร่งครัด):
+    1. การคำนวณหาวันที่นัดหมายจริง (Appointment Date):
+       - ให้คำนวณหาวันที่ ค.ศ. (YYYY-MM-DD) ให้สัมพันธ์กับวันปัจจุบัน (${bangkokDay} ที่ ${bangkokDateStr})
+       - ตัวอย่าง: หากวันนี้คือวันพุธ คำว่า "วันเสาร์" จะหมายถึงวันเสาร์ที่กำลังจะถึงในสัปดาห์นี้
+       - คำว่า "พรุ่งนี้", "มะรืนนี้", "วันจันทร์หน้า", "วันที่ 15" ให้แปลงเป็นวันที่จริงเสมอ
     
-    ส่งผลลัพธ์เป็น JSON ในรูปแบบนี้:
+    2. กฎการแจ้งเตือน (Notification Rules):
+       - "กรณีที่ 1: ไม่บอกเวลาเจาะจง" (เช่น "วันเสาร์มีนัดไปเซ็นสัญญาคอนโด", "พรุ่งนี้มีนัดหาหมอ"):
+         * has_specific_time = false
+         * appointment_date_time = วันที่นัดหมาย เช่น "${bangkokDateStr}T09:00:00"
+         * due_date_time (เวลาส่งแจ้งเตือนเข้ากลุ่ม) = ต้องเป็นเวลา "06:00:00" (6 โมงเช้า) ของวันนั้นเสมอ! (เช่น "YYYY-MM-DDT06:00:00")
+         * notification_rule = "แจ้งเตือนตอน 06:00 น. ในวันนัดหมาย"
+       - "กรณีที่ 2: บอกเวลาเจาะจง" (เช่น "วันเสาร์ 14:00 น. มีนัดไปเซ็นสัญญาคอนโด", "พรุ่งนี้ 10 โมงเช้า", "ทุ่มนึง"):
+         * has_specific_time = true
+         * appointment_date_time = วันและเวลาที่นัดหมายจริง เช่น "YYYY-MM-DDTHH:mm:ss"
+         * due_date_time (เวลาส่งแจ้งเตือนเข้ากลุ่ม) = ต้องตั้งล่วงหน้าก่อนเวลานัดหมาย 1 ชั่วโมงเสมอ! (เช่น ถ้านัด 14:00 น. ให้แจ้งเตือนตอน 13:00 น.)
+         * notification_rule = "แจ้งเตือนล่วงหน้า 1 ชั่วโมงก่อนเวลานัดหมาย"
+
+    ส่งผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
     {
       "is_reminder": boolean,
-      "title": string (หัวข้อนัดหมายหรือสิ่งที่ต้องทำ กระชับ ชัดเจน),
-      "target_person": string (คนที่เกี่ยวข้อง เช่น "ยาย", "พ่อ", "แม่", หรือ "ทุกคน"),
-      "due_date_time": "YYYY-MM-DDTHH:mm:ss" (วันและเวลาที่ต้องเตือน อ้างอิงตามเวลาปัจจุบัน),
-      "is_recurring": boolean (true ถ้าเป็นสิ่งที่ต้องเตือนประจำ เช่น ทุกวัน ทุกเดือน)
+      "title": string (หัวข้อนัดหมาย กระชับ ชัดเจน เช่น "ไปเซ็นสัญญาคอนโด", "พบแพทย์", "ช่างล้างแอร์"),
+      "target_person": string (คนที่เกี่ยวข้อง เช่น "ทุกคน", "พ่อ", "แม่", "ลูก"),
+      "appointment_date_time": "YYYY-MM-DDTHH:mm:ss",
+      "has_specific_time": boolean,
+      "due_date_time": "YYYY-MM-DDTHH:mm:ss",
+      "notification_rule": string,
+      "display_appointment": string (เช่น "วันเสาร์ที่ 3 ต.ค. 2569" หรือ "วันเสาร์ที่ 3 ต.ค. 2569 เวลา 14:00 น."),
+      "is_recurring": boolean
     }
   `;
 
@@ -185,10 +221,46 @@ export async function parseVoiceOrTextReminder(
 
   try {
     const result = await generateWithFallback(contents, { responseMimeType: "application/json" });
-    return JSON.parse(result.response.text()) as ReminderData;
+    const parsed = JSON.parse(result.response.text()) as ReminderData;
+
+    if (parsed.is_reminder && parsed.title) {
+      // บังคับใช้กฎเวลา 06:00 น. หรือ ก่อน 1 ชม. ด้วย Code ให้ถูกต้องแน่นอน 100% ตามเวลาไทย (+07:00)
+      let rawAppTime = (parsed.appointment_date_time || parsed.due_date_time || "").trim();
+      if (rawAppTime && !rawAppTime.includes("+") && !rawAppTime.endsWith("Z")) {
+        rawAppTime = `${rawAppTime}+07:00`;
+      }
+      const appDate = new Date(rawAppTime);
+
+      if (!isNaN(appDate.getTime())) {
+        const datePart = rawAppTime.slice(0, 10); // YYYY-MM-DD
+        if (!parsed.has_specific_time) {
+          // ไม่ระบุเวลา -> แจ้งตอน 6 โมงเช้า (06:00:00) ของวันนั้นตามเวลาไทย
+          const notifyDate = new Date(`${datePart}T06:00:00+07:00`);
+          parsed.due_date_time = notifyDate.toISOString();
+          parsed.notification_rule = "แจ้งเตือนตอน 06:00 น. ในวันนัดหมาย";
+        } else {
+          // ระบุเวลา -> แจ้งล่วงหน้า 1 ชั่วโมง
+          const notifyDate = new Date(appDate.getTime() - 60 * 60 * 1000);
+          parsed.due_date_time = notifyDate.toISOString();
+          const notifyTimeStr = new Intl.DateTimeFormat("en-GB", {
+            timeZone: "Asia/Bangkok",
+            hour: "2-digit",
+            minute: "2-digit",
+          }).format(notifyDate);
+          parsed.notification_rule = `แจ้งเตือนล่วงหน้า 1 ชั่วโมง (เวลา ${notifyTimeStr} น.)`;
+        }
+      }
+    }
+
+    return parsed;
   } catch (err) {
     console.error("Failed to parse reminder:", err);
-    return { is_reminder: false, title: "", due_date_time: "" };
+    return {
+      is_reminder: false,
+      title: "",
+      due_date_time: "",
+      has_specific_time: false,
+    };
   }
 }
 
