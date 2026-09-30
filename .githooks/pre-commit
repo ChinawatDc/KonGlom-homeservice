@@ -1,0 +1,17 @@
+#!/bin/sh
+# Git pre-commit hook to prevent direct commits to main
+branch="$(git symbolic-ref --short HEAD 2>/dev/null)"
+
+if [ "$branch" = "main" ]; then
+  echo ""
+  echo "🚫 [PROTECTED BRANCH VIOLATION]"
+  echo "❌ Direct commits to 'main' branch are prohibited by project rules!"
+  echo "👉 Please switch to 'develop' or create a feature branch:"
+  echo "   git checkout -b feature/your-feature-name"
+  echo "   or"
+  echo "   git checkout develop"
+  echo ""
+  exit 1
+fi
+
+exit 0
