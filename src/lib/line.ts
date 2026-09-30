@@ -128,7 +128,94 @@ export function buildSlipFlexMessage(slip: SlipData, driveUrl?: string, payerNam
 /**
  * Flex Message: สรุปเคลียร์เงินกองกลาง (Phase 2)
  */
-export function buildSettlementFlexMessage(monthYear: string, total: number, sharePerPerson: number, memberCount: number) {
+export function buildSettlementFlexMessage(
+  monthYear: string,
+  total: number,
+  sharePerPerson: number,
+  memberCount: number,
+  budgetInfo?: { monthlyBudget: number; totalSpent: number }
+) {
+  const bodyContents: any[] = [
+    {
+      type: "text",
+      text: `ยอดรวมทั้งสิ้น: ฿${total.toLocaleString("th-TH")}`,
+      weight: "bold",
+      size: "lg",
+      color: "#E25D5D",
+    },
+    { type: "text", text: `หารเฉลี่ย (${memberCount} คน): ฿${sharePerPerson.toLocaleString("th-TH")} / คน`, size: "sm" },
+  ];
+
+  if (budgetInfo && budgetInfo.monthlyBudget > 0) {
+    const percent = Math.min(100, Math.round((budgetInfo.totalSpent / budgetInfo.monthlyBudget) * 100));
+    const remaining = Math.max(0, budgetInfo.monthlyBudget - budgetInfo.totalSpent);
+    const isOver = budgetInfo.totalSpent >= budgetInfo.monthlyBudget;
+    const isWarning = percent >= 80 && !isOver;
+    const statusColor = isOver ? "#EF4444" : isWarning ? "#F59E0B" : "#10B981";
+    const statusText = isOver
+      ? `⚠️ ใช้เกินงบแล้ว (฿${budgetInfo.totalSpent.toLocaleString("th-TH")} / ฿${budgetInfo.monthlyBudget.toLocaleString("th-TH")})`
+      : isWarning
+      ? `⚡ ใกล้เต็มงบ (${percent}%) เหลือ ฿${remaining.toLocaleString("th-TH")}`
+      : `✅ อยู่ในงบ (${percent}%) เหลือ ฿${remaining.toLocaleString("th-TH")}`;
+
+    bodyContents.push(
+      { type: "separator", margin: "md" },
+      {
+        type: "box",
+        layout: "vertical",
+        spacing: "xs",
+        margin: "sm",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: "งบประมาณประจำบ้าน:", size: "xs", color: "#64748B", flex: 6 },
+              { type: "text", text: `฿${budgetInfo.monthlyBudget.toLocaleString("th-TH")}`, size: "xs", weight: "bold", align: "end", flex: 6 },
+            ],
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              { type: "text", text: statusText, size: "xs", color: statusColor, weight: "bold", wrap: true },
+            ],
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            backgroundColor: "#E2E8F0",
+            cornerRadius: "full",
+            height: "6px",
+            margin: "xs",
+            contents: [
+              {
+                type: "box",
+                layout: "vertical",
+                backgroundColor: statusColor,
+                cornerRadius: "full",
+                height: "6px",
+                width: `${percent}%`,
+                contents: [],
+              },
+            ],
+          },
+        ],
+      }
+    );
+  }
+
+  bodyContents.push(
+    { type: "separator", margin: "md" },
+    {
+      type: "text",
+      text: "กดเปิด Dashboard เพื่อดูรายงานแบบละเอียดและ QR โอนเงิน",
+      size: "xs",
+      color: "#8C8C8C",
+      margin: "sm",
+    }
+  );
+
   return {
     type: "bubble",
     header: {
@@ -143,24 +230,7 @@ export function buildSettlementFlexMessage(monthYear: string, total: number, sha
       type: "box",
       layout: "vertical",
       spacing: "sm",
-      contents: [
-        {
-          type: "text",
-          text: `ยอดรวมทั้งสิ้น: ฿${total.toLocaleString("th-TH")}`,
-          weight: "bold",
-          size: "lg",
-          color: "#E25D5D",
-        },
-        { type: "text", text: `หารเฉลี่ย (${memberCount} คน): ฿${sharePerPerson.toLocaleString("th-TH")} / คน`, size: "sm" },
-        { type: "separator", margin: "md" },
-        {
-          type: "text",
-          text: "กดเปิด Dashboard เพื่อดูรายงานแบบละเอียดและ QR โอนเงิน",
-          size: "xs",
-          color: "#8C8C8C",
-          margin: "sm",
-        },
-      ],
+      contents: bodyContents,
     },
   };
 }
@@ -961,4 +1031,168 @@ export function buildBatchSummaryFlexMessage(
     },
   };
 }
+
+export interface UpcomingReminderItem {
+  id: number;
+  title: string;
+  targetPerson?: string | null;
+  dueDateTime: Date;
+  originalInput?: string | null;
+}
+
+/**
+ * Flex Message: รายการนัดหมายและเตือนความจำที่กำลังจะมาถึง
+ */
+export function buildUpcomingRemindersFlexMessage(items: UpcomingReminderItem[]) {
+  const thaiMonths = [
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."
+  ];
+
+  const contentsList: any[] = [];
+  items.forEach((item, idx) => {
+    const d = new Date(item.dueDateTime);
+    const thaiYear = d.getFullYear() + 543;
+    const dateStr = `${d.getDate()} ${thaiMonths[d.getMonth()]} ${thaiYear}`;
+    const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")} น.`;
+
+    if (idx > 0) {
+      contentsList.push({ type: "separator", margin: "md" });
+    }
+
+    contentsList.push({
+      type: "box",
+      layout: "vertical",
+      spacing: "xs",
+      margin: idx > 0 ? "md" : "none",
+      contents: [
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            {
+              type: "text",
+              text: `${idx + 1}. ${item.title}`,
+              size: "sm",
+              weight: "bold",
+              color: "#0F172A",
+              flex: 12,
+              wrap: true,
+            },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            {
+              type: "text",
+              text: `⏰ แจ้งเตือน: ${dateStr} เวลา ${timeStr}`,
+              size: "xs",
+              color: "#2563EB",
+              flex: 12,
+            },
+          ],
+        },
+        {
+          type: "box",
+          layout: "horizontal",
+          contents: [
+            {
+              type: "text",
+              text: `👤 ผู้เกี่ยวข้อง: ${item.targetPerson || "ทุกคนในบ้าน"}`,
+              size: "xxs",
+              color: "#64748B",
+              flex: 12,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  return {
+    type: "bubble",
+    size: "mega",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#2563EB",
+      contents: [
+        { type: "text", text: "📅 รายการนัดหมายประจำบ้าน", color: "#DBEAFE", size: "xs", weight: "bold" },
+        { type: "text", text: `มีทั้งหมด ${items.length} รายการที่กำลังจะมาถึง`, color: "#FFFFFF", size: "md", weight: "bold", margin: "xs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      contents: contentsList,
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "text",
+          text: "💡 พิมพ์ \"@กลม ยกเลิกนัด [ชื่อ]\" เพื่อยกเลิกนัดหมาย",
+          size: "xxs",
+          color: "#94A3B8",
+          wrap: true,
+          align: "center",
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * Quick Reply Items สำหรับช่วยให้ผู้ใช้แตะส่งคำสั่งยอดนิยมได้ทันที
+ */
+export function getKonGlomQuickReply(): import("@line/bot-sdk").messagingApi.QuickReply {
+  return {
+    items: [
+      {
+        type: "action" as const,
+        action: {
+          type: "message" as const,
+          label: "📊 แดชบอร์ด",
+          text: "@กลม แดชบอร์ด",
+        },
+      },
+      {
+        type: "action" as const,
+        action: {
+          type: "message" as const,
+          label: "💸 เคลียร์เงิน",
+          text: "@กลม เคลียร์เงิน",
+        },
+      },
+      {
+        type: "action" as const,
+        action: {
+          type: "message" as const,
+          label: "📅 ดูนัดหมาย",
+          text: "@กลม มีนัดอะไรบ้าง",
+        },
+      },
+      {
+        type: "action" as const,
+        action: {
+          type: "message" as const,
+          label: "🧊 ตู้เย็น",
+          text: "@กลม ตู้เย็น",
+        },
+      },
+      {
+        type: "action" as const,
+        action: {
+          type: "message" as const,
+          label: "🍳 กินไรดี",
+          text: "@กลม กินไรดี",
+        },
+      },
+    ],
+  };
+}
+
 
