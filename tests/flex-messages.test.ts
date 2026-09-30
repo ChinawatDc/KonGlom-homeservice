@@ -6,6 +6,7 @@ import {
   buildMedicineFlexMessage,
   buildRecipeFlexMessage,
   buildDocumentSummaryFlexMessage,
+  buildDashboardLinkFlexMessage,
 } from "../src/lib/line";
 
 describe("LINE Flex Message Builders", () => {
@@ -98,5 +99,15 @@ describe("LINE Flex Message Builders", () => {
     expect(flex.body.contents[0].text).toBe("ใบแจ้งค่าไฟฟ้า กฟน.");
     expect(flex.footer?.contents[0].action?.uri).toBe(driveUrl);
   });
+
+  it("should generate a valid Dashboard Link Flex Message", () => {
+    const url = "https://kon-glom-homeservice.vercel.app/liff/dashboard?groupId=testGroup123";
+    const flex = buildDashboardLinkFlexMessage(url);
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toContain("แดชบอร์ดรายจ่ายของบ้าน");
+    expect(flex.footer.contents[0].action.uri).toBe(url);
+  });
 });
+
 

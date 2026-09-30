@@ -354,3 +354,54 @@ export function buildDocumentSummaryFlexMessage(
       : undefined,
   };
 }
+
+/**
+ * Flex Message: ส่งลิงก์เข้าสู่แดชบอร์ดส่วนตัวของบ้านอย่างปลอดภัย
+ */
+export function buildDashboardLinkFlexMessage(dashboardUrl: string) {
+  return {
+    type: "bubble",
+    size: "kilo",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#1E293B",
+      contents: [
+        { type: "text", text: "🏡 คนกลม โฮมเซอร์วิส", color: "#10B981", size: "xs", weight: "bold" },
+        { type: "text", text: "📊 แดชบอร์ดรายจ่ายของบ้าน", color: "#FFFFFF", size: "md", weight: "bold", margin: "xs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents: [
+        {
+          type: "text",
+          text: "🔒 ลิงก์นี้ผูกกับกลุ่มครอบครัวของคุณโดยเฉพาะ เพื่อความปลอดภัยและความเป็นส่วนตัวของบ้าน",
+          size: "xs",
+          color: "#64748B",
+          wrap: true,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: "#10B981",
+          height: "sm",
+          action: {
+            type: "uri",
+            label: "เปิดดูแดชบอร์ดครอบครัว ↗",
+            uri: dashboardUrl,
+          },
+        },
+      ],
+    },
+  };
+}
+

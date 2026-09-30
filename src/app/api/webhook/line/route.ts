@@ -12,6 +12,7 @@ import {
   buildMedicineFlexMessage,
   buildRecipeFlexMessage,
   buildDocumentSummaryFlexMessage,
+  buildDashboardLinkFlexMessage,
 } from "@/lib/line";
 import {
   parseSlipDocument,
@@ -436,7 +437,29 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.6 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
+        // 3.6 คำสั่งเปิดแดชบอร์ดส่วนตัวของบ้าน (Secure Private Dashboard Link)
+        if (
+          text.includes("แดชบอร์ด") ||
+          text.includes("dashboard") ||
+          text.includes("ดูกราฟ") ||
+          text.includes("ดูรายงาน")
+        ) {
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://kon-glom-homeservice.vercel.app";
+          const dashboardUrl = `${appUrl}/liff/dashboard?groupId=${encodeURIComponent(groupId)}`;
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "flex",
+                altText: "แดชบอร์ดรายจ่ายของบ้าน",
+                contents: buildDashboardLinkFlexMessage(dashboardUrl) as any,
+              },
+            ],
+          });
+          continue;
+        }
+
+        // 3.7 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
         if (
           text === "@บอท" ||
           text === "บอท" ||
