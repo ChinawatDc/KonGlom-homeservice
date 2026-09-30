@@ -3,7 +3,9 @@ import { Readable } from "stream";
 
 function getDriveClient() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY
+    ? process.env.GOOGLE_PRIVATE_KEY.replace(/^"|"$/g, "").replace(/\\n/g, "\n")
+    : null;
 
   if (!email || !privateKey) {
     console.warn("Google Drive Service Account credentials not provided.");
