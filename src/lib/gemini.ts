@@ -1,0 +1,238 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const apiKey = process.env.GEMINI_API_KEY || "";
+const genAI = new GoogleGenerativeAI(apiKey);
+
+export interface SlipData {
+  is_slip: boolean;
+  amount?: number;
+  bank?: string;
+  category?: string;
+  date?: string;
+  sender_name?: string;
+  receiver_name?: string;
+  note?: string;
+}
+
+export interface ReminderData {
+  is_reminder: boolean;
+  title: string;
+  target_person?: string;
+  due_date_time: string; // ISO string e.g. "2026-10-15T09:00:00"
+  is_recurring?: boolean;
+}
+
+export interface MedicineData {
+  is_medicine: boolean;
+  medicine_name: string;
+  indication: string;
+  dosage_instructions: string;
+  warnings?: string;
+}
+
+export interface RecipeData {
+  ingredients_detected: string[];
+  recommended_recipes: Array<{
+    title: string;
+    description: string;
+    difficulty: "ง่าย" | "ปานกลาง" | "ยาก";
+    time_minutes: number;
+  }>;
+}
+
+/**
+ * Phase 1: สแกนสลิปโอนเงิน / ใบเสร็จ
+ */
+export async function parseSlipImage(imageBuffer: Buffer): Promise<SlipData> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = `
+    คุณคือผู้เชี่ยวชาญด้าน OCR สลิปโอนเงินและใบเสร็จของประเทศไทย
+    โปรดวิเคราะห์รูปภาพและส่งคืนผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
+    {
+      "is_slip": boolean (true ถ้าเป็นสลิปโอนเงิน บิล หรือใบเสร็จชำระเงิน, false ถ้าไม่ใช่),
+      "amount": number (ยอดเงินเฉพาะตัวเลขทศนิยม เช่น 350.00),
+      "bank": string (ชื่อธนาคาร เช่น "KBANK", "SCB", "KTB", "BBL", "PromptPay", "GSB" หรือ "ใบเสร็จทั่วไป"),
+      "category": string (หมวดหมู่: "อาหาร", "ค่าน้ำค่าไฟ", "ของใช้ในบ้าน", "สุขภาพ/ยา", "การศึกษา/ลูก", "ช้อปปิ้ง", หรือ "ทั่วไป"),
+      "date": "YYYY-MM-DD HH:mm:ss" (วันเวลาที่ทำรายการ หากไม่พบให้ใช้วันนี้),
+      "sender_name": string (ชื่อผู้โอน),
+      "receiver_name": string (ชื่อผู้รับ),
+      "note": string (บันทึกช่วยจำถ้ามี)
+    }
+  `;
+
+  const result = await model.generateContent([
+    prompt,
+    {
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType: "image/jpeg",
+      },
+    },
+  ]);
+
+  try {
+    return JSON.parse(result.response.text()) as SlipData;
+  } catch (err) {
+    console.error("Failed to parse Gemini slip response:", err);
+    return { is_slip: false };
+  }
+}
+
+/**
+ * Phase 3: ถอดความข้อความเสียง / ข้อความเตือนความจำ
+ */
+export async function parseVoiceOrTextReminder(
+  input: { text?: string; audioBuffer?: Buffer; mimeType?: string },
+  currentDateTime: string = new Date().toISOString()
+): Promise<ReminderData> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = `
+    คุณคือเลขาประจำครอบครัว งานของคุณคือแกะนัดหมายหรือสิ่งที่ต้องเตือนความจำจากข้อความ
+    เวลาปัจจุบันคือ: ${currentDateTime} (เขตเวลา Asia/Bangkok, GMT+7)
+    
+    ส่งผลลัพธ์เป็น JSON ในรูปแบบนี้:
+    {
+      "is_reminder": boolean,
+      "title": string (หัวข้อนัดหมายหรือสิ่งที่ต้องทำ กระชับ ชัดเจน),
+      "target_person": string (คนที่เกี่ยวข้อง เช่น "ยาย", "พ่อ", "แม่", หรือ "ทุกคน"),
+      "due_date_time": "YYYY-MM-DDTHH:mm:ss" (วันและเวลาที่ต้องเตือน อ้างอิงตามเวลาปัจจุบัน),
+      "is_recurring": boolean (true ถ้าเป็นสิ่งที่ต้องเตือนประจำ เช่น ทุกวัน ทุกเดือน)
+    }
+  `;
+
+  const contents: any[] = [prompt];
+  if (input.audioBuffer && input.mimeType) {
+    contents.push({
+      inlineData: {
+        data: input.audioBuffer.toString("base64"),
+        mimeType: input.mimeType,
+      },
+    });
+  } else if (input.text) {
+    contents.push(input.text);
+  }
+
+  const result = await model.generateContent(contents);
+  try {
+    return JSON.parse(result.response.text()) as ReminderData;
+  } catch (err) {
+    console.error("Failed to parse reminder:", err);
+    return { is_reminder: false, title: "", due_date_time: "" };
+  }
+}
+
+/**
+ * Phase 4: สแกนซองยาหรือกล่องยา
+ */
+export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineData> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = `
+    คุณคือเภสัชกรประจำครอบครัว โปรดวิเคราะห์รูปซองยาหรือกล่องยา
+    และสรุปข้อมูลให้ผู้สูงอายุเข้าใจง่าย ตัวหนังสือชัดเจน เป็น JSON:
+    {
+      "is_medicine": boolean,
+      "medicine_name": string (ชื่อยา ทั้งไทยและสากลถ้ามี),
+      "indication": string (สรรพคุณแบบสั้น เข้าใจง่าย เช่น แก้ปวดหัว ลดไข้ ลดความดัน),
+      "dosage_instructions": string (วิธีรับประทานชัดเจน เช่น ครั้งละ 1 เม็ด หลังอาหารเช้า),
+      "warnings": string (ข้อควรระวัง เช่น ทานแล้วง่วง ห้ามดื่มสุรา)
+    }
+  `;
+
+  const result = await model.generateContent([
+    prompt,
+    {
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType: "image/jpeg",
+      },
+    },
+  ]);
+
+  try {
+    return JSON.parse(result.response.text()) as MedicineData;
+  } catch {
+    return { is_medicine: false, medicine_name: "", indication: "", dosage_instructions: "" };
+  }
+}
+
+/**
+ * Phase 4: เช็กข่าวสุขภาพปลอม
+ */
+export async function checkHealthClaim(claimText: string): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+  });
+
+  const prompt = `
+    คุณคือคุณหมอและผู้เชี่ยวชาญทางการแพทย์ประจำกลุ่มครอบครัว
+    มีคนในครอบครัวแชร์ข้อความนี้เข้ามา:
+    "${claimText}"
+
+    โปรดวิเคราะห์ข้อเท็จจริงทางการแพทย์:
+    1. ฟันธงสั้นๆ ชัดเจนตั้งแต่บรรทัดแรก: "ข่าวปลอม (ไม่จริง)", "จริงบางส่วน (มีข้อควรระวัง)", หรือ "ข้อเท็จจริงถูกต้อง"
+    2. อธิบายเหตุผลทางการแพทย์ด้วยภาษาที่สุภาพ เป็นกันเอง และผู้ใหญ่เข้าใจง่าย
+    3. คำแนะนำที่ถูกต้องสำหรับผู้สูงอายุ
+    (ตอบกระชับ ไม่ยาวเกินไป ไม่เกิน 4 ย่อหน้า)
+  `;
+
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+/**
+ * Phase 5: แนะนำเมนูอาหารจากของในตู้เย็น
+ */
+export async function suggestFridgeRecipes(imageBuffer?: Buffer, textList?: string): Promise<RecipeData> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = `
+    คุณคือเชฟอาหารไทยประจำบ้าน
+    วิเคราะห์วัตถุดิบและแนะนำ 3 เมนูอาหารไทยง่ายๆ ที่คนในบ้านทำทานได้ทันที
+    ส่งออกเป็น JSON:
+    {
+      "ingredients_detected": ["วัตถุดิบ 1", "วัตถุดิบ 2"],
+      "recommended_recipes": [
+        {
+          "title": "ชื่อเมนู",
+          "description": "วิธีทำแบบสรุป 2 ประโยค",
+          "difficulty": "ง่าย",
+          "time_minutes": 20
+        }
+      ]
+    }
+  `;
+
+  const contents: any[] = [prompt];
+  if (imageBuffer) {
+    contents.push({
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType: "image/jpeg",
+      },
+    });
+  } else if (textList) {
+    contents.push(`วัตถุดิบที่มี: ${textList}`);
+  }
+
+  const result = await model.generateContent(contents);
+  try {
+    return JSON.parse(result.response.text()) as RecipeData;
+  } catch {
+    return { ingredients_detected: [], recommended_recipes: [] };
+  }
+}
