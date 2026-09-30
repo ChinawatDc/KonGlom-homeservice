@@ -10,7 +10,7 @@ import {
   familySettings,
   pantryItems,
 } from "@/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, gte, asc, ilike } from "drizzle-orm";
 import {
   lineClient,
   lineBlobClient,
@@ -25,6 +25,8 @@ import {
   buildBatchSummaryFlexMessage,
   buildFamilySettingsFlexMessage,
   buildWelcomeFlexMessage,
+  buildUpcomingRemindersFlexMessage,
+  getKonGlomQuickReply,
 } from "@/lib/line";
 import {
   parseSlipDocument,
@@ -449,7 +451,7 @@ export async function POST(req: Request) {
         const text = message.text.trim();
         const senderName = await getSenderDisplayName(userId, groupId);
 
-        // 3.1 คำสั่งเคลียร์เงินกองกลาง (Phase 2)
+        // 3.1 คำสั่งเคลียร์เงินกองกลาง (Phase 2 & Budget Guard)
         if (text.includes("เคลียร์เงิน") || text.includes("สรุปยอด")) {
           const now = new Date();
           const monthYear = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -467,13 +469,195 @@ export async function POST(req: Request) {
           const memberCount = Math.max(1, parseInt(result[0]?.count || "1"));
           const sharePerPerson = total / memberCount;
 
+          // ดึงข้อมูลการตั้งค่าและงบประมาณของบ้านนี้
+          const familyRes = await db
+            .select()
+            .from(familySettings)
+            .where(eq(familySettings.groupId, groupId))
+            .limit(1);
+          const monthlyBudget = familyRes[0]?.monthlyBudget ? parseFloat(familyRes[0].monthlyBudget) : 0;
+          const budgetInfo = monthlyBudget > 0 ? { monthlyBudget, totalSpent: total } : undefined;
+
           await lineClient.replyMessage({
             replyToken,
             messages: [
               {
                 type: "flex",
                 altText: `สรุปยอดเงินเดือน ${monthYear}`,
-                contents: buildSettlementFlexMessage(monthYear, total, sharePerPerson, memberCount) as any,
+                contents: buildSettlementFlexMessage(monthYear, total, sharePerPerson, memberCount, budgetInfo) as any,
+                quickReply: getKonGlomQuickReply(),
+              },
+            ],
+          });
+          continue;
+        }
+
+        // 3.2 คำสั่งดูรายการนัดหมายที่กำลังจะมาถึง
+        if (
+          text.includes("มีนัดอะไร") ||
+          text.includes("ดูนัด") ||
+          text.includes("รายการนัด") ||
+          text.includes("นัดหมายทั้งหมด") ||
+          text === "@กลม นัด" ||
+          text === "@บอท นัด"
+        ) {
+          const now = new Date();
+          const upcomingList = await db
+            .select()
+            .from(reminders)
+            .where(
+              and(
+                eq(reminders.groupId, groupId),
+                eq(reminders.status, "pending"),
+                gte(reminders.dueDateTime, new Date(now.getTime() - 24 * 60 * 60 * 1000))
+              )
+            )
+            .orderBy(asc(reminders.dueDateTime))
+            .limit(10);
+
+          if (upcomingList.length === 0) {
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: "📅 ไม่มีนัดหมายที่ค้างอยู่ครับ!\n\n💡 สามารถบอกนัดหมายได้เลย เช่น \"@กลม วันเสาร์มีนัดไปเซ็นสัญญาคอนโด\" หรือ \"@กลม พรุ่งนี้ 10 โมงมีนัดหาหมอ\"",
+                  quickReply: getKonGlomQuickReply(),
+                },
+              ],
+            });
+            continue;
+          }
+
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "flex",
+                altText: `📅 รายการนัดหมาย (${upcomingList.length} รายการ)`,
+                contents: buildUpcomingRemindersFlexMessage(upcomingList) as any,
+                quickReply: getKonGlomQuickReply(),
+              },
+            ],
+          });
+          continue;
+        }
+
+        // 3.3 คำสั่งยกเลิกนัดหมาย
+        if (
+          text.startsWith("@กลม ยกเลิกนัด") ||
+          text.startsWith("@กลม ลบนัด") ||
+          text.startsWith("@บอท ยกเลิกนัด") ||
+          text.startsWith("ยกเลิกนัด")
+        ) {
+          const targetKeyword = text.replace(/^(@(กลม|บอท)\s*)?(ยกเลิกนัด|ลบนัด)\s*/i, "").trim();
+          if (!targetKeyword) {
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: "กรุณาระบุชื่อนัดหมายที่ต้องการยกเลิก เช่น:\n@กลม ยกเลิกนัด เซ็นสัญญาคอนโด",
+                  quickReply: getKonGlomQuickReply(),
+                },
+              ],
+            });
+            continue;
+          }
+
+          const matchingReminders = await db
+            .select()
+            .from(reminders)
+            .where(
+              and(
+                eq(reminders.groupId, groupId),
+                eq(reminders.status, "pending"),
+                ilike(reminders.title, `%${targetKeyword}%`)
+              )
+            )
+            .limit(5);
+
+          if (matchingReminders.length === 0) {
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: `ไม่พบนัดหมายที่ตรงกับ "${targetKeyword}" หรือนัดหมายนั้นอาจแจ้งเตือน/ยกเลิกไปแล้วครับ`,
+                  quickReply: getKonGlomQuickReply(),
+                },
+              ],
+            });
+            continue;
+          }
+
+          for (const item of matchingReminders) {
+            await db
+              .update(reminders)
+              .set({ status: "cancelled" })
+              .where(eq(reminders.id, item.id));
+          }
+
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "text",
+                text: `🗑 ยกเลิกนัดหมาย "${matchingReminders[0].title}" เรียบร้อยแล้วครับ! (จะไม่ส่งแจ้งเตือนเข้ากลุ่ม)`,
+                quickReply: getKonGlomQuickReply(),
+              },
+            ],
+          });
+          continue;
+        }
+
+        // 3.4 คำสั่งตั้งงบประมาณประจำบ้าน (Budget Guard)
+        if (
+          text.startsWith("@กลม ตั้งงบ") ||
+          text.startsWith("@กลม งบประมาณ") ||
+          text.startsWith("@บอท ตั้งงบ") ||
+          text.startsWith("ตั้งงบ")
+        ) {
+          const rawBudget = text.replace(/^(@(กลม|บอท)\s*)?(ตั้งงบ|งบประมาณ)\s*/i, "").replace(/,/g, "").trim();
+          const budgetNum = parseFloat(rawBudget);
+
+          if (isNaN(budgetNum) || budgetNum <= 0) {
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: "💰 กรุณาระบุจำนวนเงินงบประมาณ เช่น:\n@กลม ตั้งงบ 20000\n(เพื่อให้น้องกลมช่วยเฝ้าระวังไม่ให้ใช้จ่ายเกินงบ)",
+                  quickReply: getKonGlomQuickReply(),
+                },
+              ],
+            });
+            continue;
+          }
+
+          await db
+            .insert(familySettings)
+            .values({
+              groupId,
+              monthlyBudget: budgetNum.toString(),
+              adminLineUserId: userId || "admin",
+              updatedAt: new Date(),
+            })
+            .onConflictDoUpdate({
+              target: familySettings.groupId,
+              set: {
+                monthlyBudget: budgetNum.toString(),
+                updatedAt: new Date(),
+              },
+            });
+
+          await lineClient.replyMessage({
+            replyToken,
+            messages: [
+              {
+                type: "text",
+                text: `💰 ตั้งงบประมาณประจำบ้านเดือนนี้เป็น ฿${budgetNum.toLocaleString("th-TH")} เรียบร้อยแล้วครับ!\n\n💡 น้องกลมจะช่วยจับตาดูค่าใช้จ่าย หากรายจ่ายแตะ 80% หรือเต็มงบ จะแจ้งเตือนครอบครัวทันทีครับ ✨`,
+                quickReply: getKonGlomQuickReply(),
               },
             ],
           });
@@ -528,6 +712,43 @@ export async function POST(req: Request) {
                 {
                   type: "text",
                   text: `🧊 บันทึก "${itemText}" เข้าตู้เย็นเรียบร้อยครับ!\n\n💡 พิมพ์ "@กลม ตู้เย็น" เพื่อดูของทั้งหมด\n💡 พิมพ์ "@กลม กินไรดี" เพื่อให้ผมคิดเมนูจากของในตู้เย็นได้เลย`,
+                  quickReply: getKonGlomQuickReply(),
+                },
+              ],
+            });
+            continue;
+          }
+        }
+
+        // คำสั่งเคลียร์ของออกจากตู้เย็น (Pantry Item Removal)
+        if (
+          text.includes("กินหมดแล้ว") ||
+          text.includes("ใช้หมดแล้ว") ||
+          text.startsWith("@กลม ลบตู้เย็น") ||
+          text.startsWith("@บอท ลบตู้เย็น")
+        ) {
+          const itemKeyword = text
+            .replace(/^(@(กลม|บอท)\s*)?(กินหมดแล้ว|ใช้หมดแล้ว|ลบตู้เย็น)\s*/i, "")
+            .replace(/กินหมดแล้ว|ใช้หมดแล้ว/g, "")
+            .trim();
+
+          if (itemKeyword) {
+            await db
+              .delete(pantryItems)
+              .where(
+                and(
+                  eq(pantryItems.groupId, groupId),
+                  ilike(pantryItems.itemName, `%${itemKeyword}%`)
+                )
+              );
+
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: `🍽 อัปเดตตู้เย็น: นำ "${itemKeyword}" ออกจากรายการเรียบร้อยแล้วครับ!`,
+                  quickReply: getKonGlomQuickReply(),
                 },
               ],
             });
@@ -558,7 +779,13 @@ export async function POST(req: Request) {
 
           await lineClient.replyMessage({
             replyToken,
-            messages: [{ type: "text", text: replyText }],
+            messages: [
+              {
+                type: "text",
+                text: replyText,
+                quickReply: getKonGlomQuickReply(),
+              },
+            ],
           });
           continue;
         }
@@ -580,6 +807,7 @@ export async function POST(req: Request) {
                 type: "flex",
                 altText: "แนะนำเมนูอาหาร",
                 contents: buildRecipeFlexMessage(recipes) as any,
+                quickReply: getKonGlomQuickReply(),
               },
             ],
           });
@@ -856,7 +1084,7 @@ export async function POST(req: Request) {
             messages: [
               {
                 type: "text",
-                text: "🏡 [น้องกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@กลม แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 🔒 พิมพ์ \"@กลม ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n5. 🏡 พิมพ์ \"@กลม ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n6. 📁 พิมพ์ \"@กลม ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n7. ⚙️ พิมพ์ \"@กลม ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n8. ⏰ พิมพ์ \"@กลม เตือน [เรื่อง] [วันเวลา]\" หรือบอกนัดหมาย เช่น \"@กลม เย็นนี้ไปไหว้พระ 4 โมงครึ่ง\"\n9. 🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหาร\n10. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n11. 🩺 พิมพ์ \"@กลม เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n12. 🛠 พิมพ์ \"@กลม ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
+                text: "🏡 [น้องกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@กลม แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 💰 พิมพ์ \"@กลม ตั้งงบ [จำนวนเงิน]\" ➔ ตั้งงบประมาณบ้านประจำเดือน\n5. 🔒 พิมพ์ \"@กลม ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n6. 🏡 พิมพ์ \"@กลม ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n7. 📁 พิมพ์ \"@กลม ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n8. ⚙️ พิมพ์ \"@กลม ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n9. ⏰ บอกนัดหมายได้เลย เช่น \"@กลม เย็นนี้ไปไหว้พระ 4 โมงครึ่ง\"\n10. 📅 พิมพ์ \"@กลม มีนัดอะไรบ้าง\" ➔ ดูรายการนัดหมายที่กำลังจะมาถึง\n11. 🗑 พิมพ์ \"@กลม ยกเลิกนัด [ชื่อนัด]\" ➔ ยกเลิกนัดหมายที่ระบุ\n12. 🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหาร\n13. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n14. 🩺 พิมพ์ \"@กลม เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n15. 🛠 พิมพ์ \"@กลม ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
               },
             ],
           });
