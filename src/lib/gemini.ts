@@ -3,6 +3,38 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const apiKey = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
+// ลิสต์โมเดลที่รองรับตามลำดับความพร้อมใช้งาน เพื่อป้องกัน Error 503 (High Demand)
+const CANDIDATE_MODELS = [
+  "gemini-3.7-flash",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "gemini-flash-lite-latest",
+];
+
+/**
+ * เรียกใช้ Gemini พร้อมระบบสลับโมเดลอัตโนมัติ (Automatic Model Fallback)
+ * หากโมเดลตัวใดติด 503 หรือติดโควต้า จะสลับไปใช้ตัวถัดไปทันที
+ */
+async function generateWithFallback(
+  contents: any,
+  generationConfig: any = {}
+) {
+  let lastError: any;
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig,
+      });
+      return await model.generateContent(contents);
+    } catch (err: any) {
+      console.warn(`[Gemini Fallback] Model ${modelName} returned error: ${err.message}. Retrying with next candidate...`);
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 export interface SlipData {
   is_slip: boolean;
   amount?: number;
@@ -43,6 +75,15 @@ export interface RecipeData {
   }>;
 }
 
+export interface DocumentSummary {
+  doc_title: string;
+  doc_category: "สลิปโอนเงิน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป";
+  summary: string;
+  amount?: number | null;
+  due_date?: string | null;
+  suggested_filename: string;
+}
+
 /**
  * Phase 1 & 6 & 7: สแกนสลิปโอนเงิน / ใบเสร็จ / เอกสาร PDF
  */
@@ -50,11 +91,6 @@ export async function parseSlipDocument(
   fileBuffer: Buffer,
   mimeType: string = "image/jpeg"
 ): Promise<SlipData> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const prompt = `
     คุณคือผู้เชี่ยวชาญด้าน OCR สลิปโอนเงิน ใบเสร็จ และเอกสารการเงินของประเทศไทย
     โปรดวิเคราะห์รูปภาพหรือเอกสาร PDF นี้ และส่งคืนผลลัพธ์เป็น JSON ในรูปแบบนี้เท่านั้น:
@@ -73,17 +109,20 @@ export async function parseSlipDocument(
     }
   `;
 
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        data: fileBuffer.toString("base64"),
-        mimeType: mimeType || "image/jpeg",
-      },
-    },
-  ]);
-
   try {
+    const result = await generateWithFallback(
+      [
+        prompt,
+        {
+          inlineData: {
+            data: fileBuffer.toString("base64"),
+            mimeType: mimeType || "image/jpeg",
+          },
+        },
+      ],
+      { responseMimeType: "application/json" }
+    );
+
     return JSON.parse(result.response.text()) as SlipData;
   } catch (err) {
     console.error("Failed to parse Gemini slip document response:", err);
@@ -101,11 +140,6 @@ export async function parseVoiceOrTextReminder(
   input: { text?: string; audioBuffer?: Buffer; mimeType?: string },
   currentDateTime: string = new Date().toISOString()
 ): Promise<ReminderData> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const prompt = `
     คุณคือเลขาประจำครอบครัว งานของคุณคือแกะนัดหมายหรือสิ่งที่ต้องเตือนความจำจากข้อความ
     เวลาปัจจุบันคือ: ${currentDateTime} (เขตเวลา Asia/Bangkok, GMT+7)
@@ -132,8 +166,8 @@ export async function parseVoiceOrTextReminder(
     contents.push(input.text);
   }
 
-  const result = await model.generateContent(contents);
   try {
+    const result = await generateWithFallback(contents, { responseMimeType: "application/json" });
     return JSON.parse(result.response.text()) as ReminderData;
   } catch (err) {
     console.error("Failed to parse reminder:", err);
@@ -145,11 +179,6 @@ export async function parseVoiceOrTextReminder(
  * Phase 4: สแกนซองยาหรือกล่องยา
  */
 export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineData> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const prompt = `
     คุณคือเภสัชกรประจำครอบครัว โปรดวิเคราะห์รูปซองยาหรือกล่องยา
     และสรุปข้อมูลให้ผู้สูงอายุเข้าใจง่าย ตัวหนังสือชัดเจน เป็น JSON:
@@ -162,17 +191,20 @@ export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineD
     }
   `;
 
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        data: imageBuffer.toString("base64"),
-        mimeType: "image/jpeg",
-      },
-    },
-  ]);
-
   try {
+    const result = await generateWithFallback(
+      [
+        prompt,
+        {
+          inlineData: {
+            data: imageBuffer.toString("base64"),
+            mimeType: "image/jpeg",
+          },
+        },
+      ],
+      { responseMimeType: "application/json" }
+    );
+
     return JSON.parse(result.response.text()) as MedicineData;
   } catch {
     return { is_medicine: false, medicine_name: "", indication: "", dosage_instructions: "" };
@@ -183,10 +215,6 @@ export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineD
  * Phase 4: เช็กข่าวสุขภาพปลอม
  */
 export async function checkHealthClaim(claimText: string): Promise<string> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-  });
-
   const prompt = `
     คุณคือคุณหมอและผู้เชี่ยวชาญทางการแพทย์ประจำกลุ่มครอบครัว
     มีคนในครอบครัวแชร์ข้อความนี้เข้ามา:
@@ -199,19 +227,18 @@ export async function checkHealthClaim(claimText: string): Promise<string> {
     (ตอบกระชับ ไม่ยาวเกินไป ไม่เกิน 4 ย่อหน้า)
   `;
 
-  const result = await model.generateContent(prompt);
-  return result.response.text();
+  try {
+    const result = await generateWithFallback(prompt);
+    return result.response.text();
+  } catch (err: any) {
+    return `⚠️ ไม่สามารถตรวจสอบข้อความได้ในขณะนี้: ${err.message}`;
+  }
 }
 
 /**
  * Phase 5: แนะนำเมนูอาหารจากของในตู้เย็น
  */
 export async function suggestFridgeRecipes(imageBuffer?: Buffer, textList?: string): Promise<RecipeData> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const prompt = `
     คุณคือเชฟอาหารไทยประจำบ้าน
     วิเคราะห์วัตถุดิบและแนะนำ 3 เมนูอาหารไทยง่ายๆ ที่คนในบ้านทำทานได้ทันที
@@ -241,21 +268,12 @@ export async function suggestFridgeRecipes(imageBuffer?: Buffer, textList?: stri
     contents.push(`วัตถุดิบที่มี: ${textList}`);
   }
 
-  const result = await model.generateContent(contents);
   try {
+    const result = await generateWithFallback(contents, { responseMimeType: "application/json" });
     return JSON.parse(result.response.text()) as RecipeData;
   } catch {
     return { ingredients_detected: [], recommended_recipes: [] };
   }
-}
-
-export interface DocumentSummary {
-  doc_title: string;
-  doc_category: "สลิปโอนเงิน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป";
-  summary: string;
-  amount?: number | null;
-  due_date?: string | null;
-  suggested_filename: string;
 }
 
 /**
@@ -265,11 +283,6 @@ export async function summarizeDocument(
   fileBuffer: Buffer,
   mimeType: string = "application/pdf"
 ): Promise<DocumentSummary> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-3.8-flash",
-    generationConfig: { responseMimeType: "application/json" },
-  });
-
   const prompt = `
     คุณคือผู้ช่วยประจำครอบครัวที่เชี่ยวชาญด้านการจัดการเอกสาร บิล และไฟล์ PDF
     โปรดวิเคราะห์ไฟล์เอกสารนี้ และสรุปผลออกมาเป็น JSON ตามโครงสร้างนี้เท่านั้น:
@@ -284,15 +297,18 @@ export async function summarizeDocument(
   `;
 
   try {
-    const result = await model.generateContent([
-      prompt,
-      {
-        inlineData: {
-          data: fileBuffer.toString("base64"),
-          mimeType: mimeType || "application/pdf",
+    const result = await generateWithFallback(
+      [
+        prompt,
+        {
+          inlineData: {
+            data: fileBuffer.toString("base64"),
+            mimeType: mimeType || "application/pdf",
+          },
         },
-      },
-    ]);
+      ],
+      { responseMimeType: "application/json" }
+    );
 
     return JSON.parse(result.response.text()) as DocumentSummary;
   } catch (err) {
@@ -307,4 +323,3 @@ export async function summarizeDocument(
     };
   }
 }
-
