@@ -45,7 +45,7 @@ export interface RecipeData {
  */
 export async function parseSlipImage(imageBuffer: Buffer): Promise<SlipData> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3.8-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
@@ -90,7 +90,7 @@ export async function parseVoiceOrTextReminder(
   currentDateTime: string = new Date().toISOString()
 ): Promise<ReminderData> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3.8-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
@@ -134,7 +134,7 @@ export async function parseVoiceOrTextReminder(
  */
 export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineData> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3.8-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
@@ -172,7 +172,7 @@ export async function parseMedicineLabel(imageBuffer: Buffer): Promise<MedicineD
  */
 export async function checkHealthClaim(claimText: string): Promise<string> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3.8-flash",
   });
 
   const prompt = `
@@ -196,7 +196,7 @@ export async function checkHealthClaim(claimText: string): Promise<string> {
  */
 export async function suggestFridgeRecipes(imageBuffer?: Buffer, textList?: string): Promise<RecipeData> {
   const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3.8-flash",
     generationConfig: { responseMimeType: "application/json" },
   });
 
