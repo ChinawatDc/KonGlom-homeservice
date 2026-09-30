@@ -172,22 +172,45 @@ export async function POST(req: Request) {
             }
           }
 
-          // ตรวจสอบการตั้งค่าโฟลเดอร์ Google Drive ของบ้านนี้ (Multi-Tenant Isolation)
+          // ตรวจสอบข้อมูลและการตั้งค่าโฟลเดอร์ Google Drive ของบ้านนี้ (Multi-Tenant Isolation)
           const familySettingsList = await db
             .select()
             .from(familySettings)
             .where(eq(familySettings.groupId, groupId))
             .limit(1);
-          const tenantDriveFolderId = familySettingsList[0]?.driveFolderId || undefined;
 
-          // อัปโหลดเข้า Google Drive ทันที
+          const currentFamily = familySettingsList[0];
+          const familyName = currentFamily?.familyName || "บ้านก้อนกลม";
+          const tenantDriveFolderId = currentFamily?.driveFolderId || undefined;
+
+          // อัปโหลดเข้า Google Drive ทันที โดยแยกโฟลเดอร์ตามบ้าน (เช่น บ้านก้อนกลม)
           const driveUpload = await uploadFileToDrive(
             fileBuffer,
             cleanFileName,
             mimeType,
             subFolder,
-            tenantDriveFolderId
+            tenantDriveFolderId,
+            familyName
           );
+
+          // ถ้าสร้างโฟลเดอร์ของบ้านใน Google Drive ได้ และยังไม่มีบันทึก driveFolderId ให้บันทึกไว้ทันที
+          if (driveUpload?.familyFolderId && !currentFamily?.driveFolderId) {
+            await db
+              .insert(familySettings)
+              .values({
+                groupId,
+                familyName,
+                driveFolderId: driveUpload.familyFolderId,
+                updatedAt: new Date(),
+              })
+              .onConflictDoUpdate({
+                target: familySettings.groupId,
+                set: {
+                  driveFolderId: driveUpload.familyFolderId,
+                  updatedAt: new Date(),
+                },
+              });
+          }
 
           // ถ้าเป็นสลิปโอนเงินจริง ตรวจสอบสลิปซ้ำและบันทึกรายจ่าย
           if (isExpense && amountStr) {
@@ -407,7 +430,11 @@ export async function POST(req: Request) {
         }
 
         // 3.2 คำสั่งสั่งเตือนความจำด้วยข้อความ (Phase 3)
-        if (text.startsWith("@บอท เตือน") || text.startsWith("เตือน")) {
+        if (
+          text.startsWith("@กลม เตือน") ||
+          text.startsWith("@บอท เตือน") ||
+          text.startsWith("เตือน")
+        ) {
           const reminder = await parseVoiceOrTextReminder({ text });
           if (reminder.is_reminder && reminder.title) {
             await db.insert(reminders).values({
@@ -435,8 +462,15 @@ export async function POST(req: Request) {
         }
 
         // 3.3 คำสั่งเช็กข่าวสุขภาพปลอม (Phase 4)
-        if (text.startsWith("@บอท เช็กข่าว") || text.startsWith("เช็กข่าว") || text.startsWith("เช็คข่าว")) {
-          const claim = text.replace(/^(@บอท\s*)?(เช็กข่าว|เช็คข่าว)\s*/, "");
+        if (
+          text.startsWith("@กลม เช็กข่าว") ||
+          text.startsWith("@กลม เช็คข่าว") ||
+          text.startsWith("@บอท เช็กข่าว") ||
+          text.startsWith("@บอท เช็คข่าว") ||
+          text.startsWith("เช็กข่าว") ||
+          text.startsWith("เช็คข่าว")
+        ) {
+          const claim = text.replace(/^(@(กลม|บอท)\s*)?(เช็กข่าว|เช็คข่าว)\s*/, "");
           const factCheck = await checkHealthClaim(claim);
 
           await lineClient.replyMessage({
@@ -494,18 +528,20 @@ export async function POST(req: Request) {
 
         // 3.6 คำสั่งตั้งรหัส PIN บ้าน (Multi-Family Security Pillar 1)
         if (
+          text.startsWith("@กลม ตั้งรหัส") ||
+          text.startsWith("@กลม ตั้งพิน") ||
           text.startsWith("@บอท ตั้งรหัส") ||
           text.startsWith("@บอท ตั้งพิน") ||
           text.startsWith("ตั้งรหัส")
         ) {
-          const pin = text.replace(/^(@บอท\s*)?(ตั้งรหัส|ตั้งพิน)\s*/i, "").trim();
+          const pin = text.replace(/^(@(กลม|บอท)\s*)?(ตั้งรหัส|ตั้งพิน)\s*/i, "").trim();
           if (!pin || pin.length < 4 || pin.length > 20) {
             await lineClient.replyMessage({
               replyToken,
               messages: [
                 {
                   type: "text",
-                  text: "🔒 กรุณาระบุรหัส PIN 4-6 หลัก เช่น:\n@บอท ตั้งรหัส 1234\n\n(รหัสนี้จะใช้สำหรับปลดล็อกเข้าดูแดชบอร์ดรายจ่ายของครอบครัวบนเว็บเบราว์เซอร์ครับ)",
+                  text: "🔒 กรุณาระบุรหัส PIN 4-6 หลัก เช่น:\n@กลม ตั้งรหัส 1234\n\n(รหัสนี้จะใช้สำหรับปลดล็อกเข้าดูแดชบอร์ดรายจ่ายของครอบครัวบนเว็บเบราว์เซอร์ครับ)",
                 },
               ],
             });
@@ -542,15 +578,19 @@ export async function POST(req: Request) {
         }
 
         // 3.7 คำสั่งตั้งชื่อบ้าน (Multi-Family Customization)
-        if (text.startsWith("@บอท ตั้งชื่อบ้าน") || text.startsWith("ตั้งชื่อบ้าน")) {
-          const name = text.replace(/^(@บอท\s*)?ตั้งชื่อบ้าน\s*/i, "").trim();
+        if (
+          text.startsWith("@กลม ตั้งชื่อบ้าน") ||
+          text.startsWith("@บอท ตั้งชื่อบ้าน") ||
+          text.startsWith("ตั้งชื่อบ้าน")
+        ) {
+          const name = text.replace(/^(@(กลม|บอท)\s*)?ตั้งชื่อบ้าน\s*/i, "").trim();
           if (!name) {
             await lineClient.replyMessage({
               replyToken,
               messages: [
                 {
                   type: "text",
-                  text: "🏡 กรุณาระบุชื่อบ้าน เช่น:\n@บอท ตั้งชื่อบ้าน บ้านสุขสันต์",
+                  text: "🏡 กรุณาระบุชื่อบ้าน เช่น:\n@กลม ตั้งชื่อบ้าน บ้านสุขสันต์",
                 },
               ],
             });
@@ -587,11 +627,13 @@ export async function POST(req: Request) {
 
         // 3.8 คำสั่งผูก Google Drive โฟลเดอร์เฉพาะบ้าน (Multi-Tenant Drive Isolation)
         if (
+          text.startsWith("@กลม ตั้งไดรฟ์") ||
+          text.startsWith("@กลม ผูกไดรฟ์") ||
           text.startsWith("@บอท ตั้งไดรฟ์") ||
           text.startsWith("@บอท ผูกไดรฟ์") ||
           text.startsWith("ตั้งไดรฟ์")
         ) {
-          const rawInput = text.replace(/^(@บอท\s*)?(ตั้งไดรฟ์|ผูกไดรฟ์)\s*/i, "").trim();
+          const rawInput = text.replace(/^(@(กลม|บอท)\s*)?(ตั้งไดรฟ์|ผูกไดรฟ์)\s*/i, "").trim();
           const folderId = extractDriveFolderId(rawInput);
 
           if (!folderId) {
@@ -600,7 +642,7 @@ export async function POST(req: Request) {
               messages: [
                 {
                   type: "text",
-                  text: "📁 กรุณาระบุ Google Drive Folder ID หรือลิงก์ เช่น:\n@บอท ตั้งไดรฟ์ 1WinPhipplh6_xISDEtE6UIffrfKCUt7K\nหรือวางลิงก์ https://drive.google.com/drive/folders/...",
+                  text: "📁 กรุณาระบุ Google Drive Folder ID หรือลิงก์ เช่น:\n@กลม ตั้งไดรฟ์ 1WinPhipplh6_xISDEtE6UIffrfKCUt7K\nหรือวางลิงก์ https://drive.google.com/drive/folders/...",
                 },
               ],
             });
@@ -640,6 +682,7 @@ export async function POST(req: Request) {
           text.includes("ข้อมูลบ้าน") ||
           text.includes("สถานะบ้าน") ||
           text.includes("ตั้งค่าบ้าน") ||
+          text === "@กลม บ้าน" ||
           text === "@บอท บ้าน"
         ) {
           const familyList = await db
@@ -650,7 +693,7 @@ export async function POST(req: Request) {
 
           const fam = familyList[0];
           const flex = buildFamilySettingsFlexMessage({
-            familyName: fam?.familyName || "ครอบครัวคนกลม",
+            familyName: fam?.familyName || "บ้านก้อนกลม",
             familyPin: fam?.familyPin || null,
             adminLineUserId: fam?.adminLineUserId || null,
             adminName: fam?.adminLineUserId === userId ? senderName : null,
@@ -664,7 +707,7 @@ export async function POST(req: Request) {
             messages: [
               {
                 type: "flex",
-                altText: `ข้อมูลบ้าน: ${fam?.familyName || "ครอบครัวคนกลม"}`,
+                altText: `ข้อมูลบ้าน: ${fam?.familyName || "บ้านก้อนกลม"}`,
                 contents: flex as any,
               },
             ],
@@ -685,7 +728,7 @@ export async function POST(req: Request) {
             .where(eq(familySettings.groupId, groupId))
             .limit(1);
           const fam = familyList[0];
-          const familyName = fam?.familyName || "ครอบครัวคนกลม";
+          const familyName = fam?.familyName || "บ้านก้อนกลม";
           const hasPin = Boolean(fam?.familyPin);
 
           const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://kon-glom-homeservice.vercel.app";
@@ -705,14 +748,17 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // 3.11 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
+        // 3.11 คำสั่งช่วยเหลือ / แนะนำตัว (เมื่อพิมพ์ @กลม, @บอท, ช่วยอะไรได้บ้าง, เมนู, คู่มือ)
         if (
+          text === "@กลม" ||
           text === "@บอท" ||
+          text === "กลม" ||
           text === "บอท" ||
           text === "เมนู" ||
           text === "คู่มือ" ||
           text.includes("ช่วยอะไรได้บ้าง") ||
           text.includes("วิธีใช้") ||
+          text.startsWith("@กลม") ||
           text.startsWith("@บอท")
         ) {
           await lineClient.replyMessage({
@@ -720,7 +766,7 @@ export async function POST(req: Request) {
             messages: [
               {
                 type: "text",
-                text: "🏡 [คนกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@บอท เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@บอท แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 🔒 พิมพ์ \"@บอท ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n5. 🏡 พิมพ์ \"@บอท ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n6. 📁 พิมพ์ \"@บอท ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n7. ⚙️ พิมพ์ \"@บอท ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n8. ⏰ พิมพ์ \"@บอท เตือน [เรื่อง] [วันเวลา]\" หรือส่งคลิปเสียง ➔ บันทึกนัดหมาย\n9. 🍳 พิมพ์ \"@บอท กินไรดี\" ➔ แนะนำเมนูอาหาร\n10. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n11. 🩺 พิมพ์ \"@บอท เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n12. 🛠 พิมพ์ \"@บอท ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
+                text: "🏡 [น้องกลม โฮมเซอร์วิส] วิธีใช้งานคำสั่ง:\n\n1. 💸 ส่งรูปสลิป / PDF ➔ สำรองไฟล์เข้า Google Drive + สรุปรวมอัจฉริยะ\n2. 📊 พิมพ์ \"@กลม เคลียร์เงิน\" ➔ ดูสรุปยอดเงินและส่วนต่างที่ต้องโอน\n3. 📈 พิมพ์ \"@กลม แดชบอร์ด\" ➔ ดูแดชบอร์ดและกราฟสรุปรายจ่าย\n4. 🔒 พิมพ์ \"@กลม ตั้งรหัส [PIN]\" ➔ ตั้งรหัส PIN ล็อกแดชบอร์ดประจำบ้าน\n5. 🏡 พิมพ์ \"@กลม ตั้งชื่อบ้าน [ชื่อ]\" ➔ เปลี่ยนชื่อบ้าน\n6. 📁 พิมพ์ \"@กลม ตั้งไดรฟ์ [ID]\" ➔ ผูก Google Drive แยกเฉพาะบ้าน\n7. ⚙️ พิมพ์ \"@กลม ข้อมูลบ้าน\" ➔ ดูการตั้งค่าและสถานะบ้าน\n8. ⏰ พิมพ์ \"@กลม เตือน [เรื่อง] [วันเวลา]\" หรือส่งคลิปเสียง ➔ บันทึกนัดหมาย\n9. 🍳 พิมพ์ \"@กลม กินไรดี\" ➔ แนะนำเมนูอาหาร\n10. 💊 ส่งรูปซองยา ➔ อ่านสรรพคุณและวิธีทาน\n11. 🩺 พิมพ์ \"@กลม เช็กข่าว [ข้อความ]\" ➔ ตรวจข่าวสุขภาพปลอม\n12. 🛠 พิมพ์ \"@กลม ล้างแอร์\" ➔ ดูรอบการดูแลรักษาบ้าน",
               },
             ],
           });

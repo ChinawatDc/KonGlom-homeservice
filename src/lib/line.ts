@@ -509,7 +509,7 @@ export function buildFamilySettingsFlexMessage(info: FamilySettingsInfo) {
         },
         {
           type: "text",
-          text: "💡 คำสั่งตั้งค่าสำหรับบ้าน:\n• @บอท ตั้งชื่อบ้าน [ชื่อ]\n• @บอท ตั้งรหัส [PIN 4-6 หลัก]\n• @บอท ตั้งไดรฟ์ [Folder ID หรือ URL]",
+          text: "💡 คำสั่งตั้งค่าสำหรับบ้าน:\n• @กลม ตั้งชื่อบ้าน [ชื่อ]\n• @กลม ตั้งรหัส [PIN 4-6 หลัก]\n• @กลม ตั้งไดรฟ์ [Folder ID หรือ URL]",
           size: "xxs",
           color: "#64748B",
           wrap: true,

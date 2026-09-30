@@ -131,7 +131,7 @@ export const uploadedFilesQueue = pgTable("uploaded_files_queue", {
 // =========================================================================
 export const familySettings = pgTable("family_settings", {
   groupId: varchar("group_id", { length: 100 }).primaryKey(),
-  familyName: varchar("family_name", { length: 150 }).default("ครอบครัวคนกลม").notNull(),
+  familyName: varchar("family_name", { length: 150 }).default("บ้านก้อนกลม").notNull(),
   familyPin: varchar("family_pin", { length: 20 }),            // รหัส PIN 4-6 หลัก
   adminLineUserId: varchar("admin_line_user_id", { length: 100 }), // หัวหน้าบ้าน / ผู้ดูแล
   driveFolderId: varchar("drive_folder_id", { length: 150 }),  // โฟลเดอร์ Google Drive แยกบ้าน

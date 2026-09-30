@@ -184,7 +184,7 @@ export default function Home() {
                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-normal">Private</span>
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                พิมพ์ &quot;@บอท เคลียร์เงิน&quot; เพื่อสรุปยอด หรือพิมพ์ &quot;@บอท แดชบอร์ด&quot; เพื่อรับลิงก์เปิดดูกราฟส่วนตัวเฉพาะสมาชิกในบ้าน
+                พิมพ์ &quot;@กลม เคลียร์เงิน&quot; เพื่อสรุปยอด หรือพิมพ์ &quot;@กลม แดชบอร์ด&quot; เพื่อรับลิงก์เปิดดูกราฟส่วนตัวเฉพาะสมาชิกในบ้าน
               </p>
             </div>
 
@@ -197,7 +197,7 @@ export default function Home() {
                 เตือนความจำด้วยเสียง
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                ส่งคลิปเสียงพูด หรือพิมพ์นัดหมาย เช่น &quot;@บอท เตือนพาแม่ไปหาหมอ&quot; ระบบจะตั้งเตือนและแจ้งเตือนเข้ากลุ่มอัตโนมัติ
+                ส่งคลิปเสียงพูด หรือพิมพ์นัดหมาย เช่น &quot;@กลม เตือนพาแม่ไปหาหมอ&quot; ระบบจะตั้งเตือนและแจ้งเตือนเข้ากลุ่มอัตโนมัติ
               </p>
             </div>
 
@@ -223,7 +223,7 @@ export default function Home() {
                 สแกนตู้เย็น & แนะนำเมนู
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                ถ่ายรูปของสดในตู้เย็น หรือพิมพ์ &quot;@บอท กินไรดี&quot; ระบบจะช่วยแนะนำเมนูอาหารจากวัตถุดิบที่มีในบ้าน
+                ถ่ายรูปของสดในตู้เย็น หรือพิมพ์ &quot;@กลม กินไรดี&quot; ระบบจะช่วยแนะนำเมนูอาหารจากวัตถุดิบที่มีในบ้าน
               </p>
             </div>
 
@@ -250,11 +250,11 @@ export default function Home() {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs sm:text-sm text-slate-300">
               <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
-                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@บอท แดชบอร์ด</span>
+                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@กลม แดชบอร์ด</span>
                 <span>รับลิงก์ส่วนตัวเข้าสู่แดชบอร์ดรายจ่ายของครอบครัวคุณ</span>
               </div>
               <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
-                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@บอท เคลียร์เงิน</span>
+                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@กลม เคลียร์เงิน</span>
                 <span>สรุปยอดรายจ่ายของทุกคน และวิธีโอนเงินชดเชย</span>
               </div>
               <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
@@ -262,7 +262,7 @@ export default function Home() {
                 <span>อ่านยอดและสำรองเข้า Google Drive ในโฟลเดอร์ของบ้าน</span>
               </div>
               <div className="flex items-start gap-3 p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
-                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@บอท</span>
+                <span className="font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-xs shrink-0">@กลม</span>
                 <span>ดูเมนูคำสั่งและคู่มือการใช้งานทั้งหมดที่บอทรองรับ</span>
               </div>
             </div>

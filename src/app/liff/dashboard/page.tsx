@@ -83,7 +83,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               1. เปิดแอป LINE เข้ากลุ่มแชทครอบครัวของคุณ
             </p>
             <p className="text-xs text-slate-300 leading-relaxed mb-2">
-              2. พิมพ์ข้อความหาบอท: <code className="bg-slate-800 px-2 py-0.5 rounded text-emerald-300 font-mono font-bold">@บอท แดชบอร์ด</code>
+              2. พิมพ์ข้อความหาบอท: <code className="bg-slate-800 px-2 py-0.5 rounded text-emerald-300 font-mono font-bold">@กลม แดชบอร์ด</code>
             </p>
             <p className="text-xs text-slate-400 leading-relaxed">
               3. บอทจะส่งลิงก์ส่วนตัวที่ผูกกับบ้านของคุณให้ทันที
@@ -178,7 +178,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
               สมาชิกสามารถดูหรือตั้งรหัสใหม่ได้โดยพิมพ์ในกลุ่มแชท LINE:
             </p>
             <code className="block mt-1.5 bg-slate-800 p-2 rounded-lg text-emerald-300 font-mono text-center">
-              @บอท ตั้งรหัส [PIN ใหม่]
+              @กลม ตั้งรหัส [PIN ใหม่]
             </code>
           </div>
 
@@ -326,7 +326,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 
               {!hasPinConfigured && !isDemo && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-medium">
-                  💡 แนะนำ: พิมพ์ @บอท ตั้งรหัส ใน LINE เพื่อล็อค
+                  💡 แนะนำ: พิมพ์ @กลม ตั้งรหัส ใน LINE เพื่อล็อค
                 </span>
               )}
             </div>
