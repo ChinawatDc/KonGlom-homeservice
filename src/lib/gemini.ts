@@ -248,3 +248,63 @@ export async function suggestFridgeRecipes(imageBuffer?: Buffer, textList?: stri
     return { ingredients_detected: [], recommended_recipes: [] };
   }
 }
+
+export interface DocumentSummary {
+  doc_title: string;
+  doc_category: "สลิปโอนเงิน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป";
+  summary: string;
+  amount?: number | null;
+  due_date?: string | null;
+  suggested_filename: string;
+}
+
+/**
+ * สรุปและจำแนกหมวดหมู่เอกสาร PDF / รูปภาพเอกสารทั่วไป
+ */
+export async function summarizeDocument(
+  fileBuffer: Buffer,
+  mimeType: string = "application/pdf"
+): Promise<DocumentSummary> {
+  const model = genAI.getGenerativeModel({
+    model: "gemini-3.8-flash",
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = `
+    คุณคือผู้ช่วยประจำครอบครัวที่เชี่ยวชาญด้านการจัดการเอกสาร บิล และไฟล์ PDF
+    โปรดวิเคราะห์ไฟล์เอกสารนี้ และสรุปผลออกมาเป็น JSON ตามโครงสร้างนี้เท่านั้น:
+    {
+      "doc_title": string (ชื่อหรือหัวข้อเอกสารที่ชัดเจน เช่น "ใบแจ้งค่าไฟฟ้า กฟน.", "กรมธรรม์ประกันสุขภาพ AIA", "ใบเสร็จค่ารักษาพยาบาล", "สัญญาเช่า"),
+      "doc_category": "สลิปโอนเงิน" | "บิลและใบแจ้งหนี้" | "เอกสารลดหย่อนภาษี" | "สุขภาพและการแพทย์" | "เอกสารทั่วไป",
+      "summary": string (สรุปเนื้อหาสำคัญของเอกสาร 2-3 บรรทัด สื่อสารให้คนในครอบครัวเข้าใจง่าย),
+      "amount": number or null (ยอดเงินรวมหรือยอดที่ต้องชำระ ถ้าไม่มีให้ใส่ null),
+      "due_date": string or null (วันครบกำหนดชำระหรือวันที่มีผล เช่น "15 ต.ค. 2026" ถ้าไม่มีให้ใส่ null),
+      "suggested_filename": string (ชื่อไฟล์ภาษาไทยที่อ่านง่ายและมีวันที่ เช่น "2026-09-30_บิลค่าไฟ_1450.pdf")
+    }
+  `;
+
+  try {
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: fileBuffer.toString("base64"),
+          mimeType: mimeType || "application/pdf",
+        },
+      },
+    ]);
+
+    return JSON.parse(result.response.text()) as DocumentSummary;
+  } catch (err) {
+    console.error("Failed to parse document summary:", err);
+    return {
+      doc_title: "เอกสารทั่วไป",
+      doc_category: "เอกสารทั่วไป",
+      summary: "ได้รับไฟล์เอกสารและสำรองเข้า Google Drive เรียบร้อยแล้ว",
+      amount: null,
+      due_date: null,
+      suggested_filename: `doc_${Date.now()}.pdf`,
+    };
+  }
+}
+

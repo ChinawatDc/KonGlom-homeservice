@@ -1,5 +1,5 @@
 import { messagingApi } from "@line/bot-sdk";
-import type { SlipData, ReminderData, MedicineData, RecipeData } from "./gemini";
+import type { SlipData, ReminderData, MedicineData, RecipeData, DocumentSummary } from "./gemini";
 
 const { MessagingApiClient, MessagingApiBlobClient } = messagingApi;
 
@@ -248,5 +248,109 @@ export function buildRecipeFlexMessage(recipeData: RecipeData) {
         ],
       })),
     },
+  };
+}
+
+/**
+ * Flex Message: สรุปและจัดเก็บเอกสาร PDF / เอกสารทั่วไป
+ */
+export function buildDocumentSummaryFlexMessage(
+  doc: DocumentSummary,
+  driveUrl?: string,
+  folderPath?: string
+) {
+  const contents: any[] = [
+    { type: "text", text: doc.doc_title, weight: "bold", size: "lg", color: "#1E293B", wrap: true },
+    {
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "หมวดหมู่", size: "xs", color: "#64748B", flex: 2 },
+        { type: "text", text: doc.doc_category, size: "xs", weight: "bold", color: "#0EA5E9", flex: 4, align: "end" },
+      ],
+    },
+  ];
+
+  if (doc.amount) {
+    contents.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "ยอดเงิน", size: "xs", color: "#64748B", flex: 2 },
+        {
+          type: "text",
+          text: `฿ ${Number(doc.amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`,
+          size: "sm",
+          weight: "bold",
+          color: "#E11D48",
+          flex: 4,
+          align: "end",
+        },
+      ],
+    });
+  }
+
+  if (doc.due_date) {
+    contents.push({
+      type: "box",
+      layout: "horizontal",
+      contents: [
+        { type: "text", text: "กำหนดชำระ", size: "xs", color: "#64748B", flex: 2 },
+        { type: "text", text: doc.due_date, size: "xs", weight: "bold", color: "#D97706", flex: 4, align: "end" },
+      ],
+    });
+  }
+
+  contents.push(
+    { type: "separator", margin: "md" },
+    { type: "text", text: "📝 สรุปสาระสำคัญ:", size: "xs", color: "#64748B", margin: "md" },
+    { type: "text", text: doc.summary, size: "sm", color: "#334155", wrap: true },
+    { type: "separator", margin: "md" },
+    {
+      type: "box",
+      layout: "horizontal",
+      margin: "sm",
+      contents: [
+        { type: "text", text: "📁 ไดรฟ์", size: "xxs", color: "#94A3B8", flex: 2 },
+        { type: "text", text: folderPath || "Google Drive", size: "xxs", color: "#64748B", flex: 5, align: "end" },
+      ],
+    }
+  );
+
+  return {
+    type: "bubble",
+    header: {
+      type: "box",
+      layout: "vertical",
+      backgroundColor: "#0EA5E9",
+      contents: [
+        { type: "text", text: "🏡 คนกลม โฮมเซอร์วิส", color: "#FFFFFF", size: "xs", weight: "bold" },
+        { type: "text", text: "📄 จัดเก็บเอกสารและสรุปสำเร็จ", color: "#FFFFFF", size: "md", weight: "bold", margin: "xs" },
+      ],
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      spacing: "sm",
+      contents,
+    },
+    footer: driveUrl
+      ? {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            {
+              type: "button",
+              style: "link",
+              height: "sm",
+              action: {
+                type: "uri",
+                label: "เปิดดูเอกสารบน Google Drive ↗",
+                uri: driveUrl,
+              },
+            },
+          ],
+        }
+      : undefined,
   };
 }

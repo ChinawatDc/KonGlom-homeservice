@@ -5,6 +5,7 @@ import {
   buildReminderFlexMessage,
   buildMedicineFlexMessage,
   buildRecipeFlexMessage,
+  buildDocumentSummaryFlexMessage,
 } from "../src/lib/line";
 
 describe("LINE Flex Message Builders", () => {
@@ -79,4 +80,23 @@ describe("LINE Flex Message Builders", () => {
     expect(flex.type).toBe("bubble");
     expect(flex.body.contents[0].contents[0].text).toContain("ไข่เจียวหมูสับ");
   });
+
+  it("should generate a valid Document Summary Flex Message", () => {
+    const doc = {
+      doc_title: "ใบแจ้งค่าไฟฟ้า กฟน.",
+      doc_category: "บิลและใบแจ้งหนี้" as const,
+      summary: "ค่าไฟฟ้ารอบบิล 09/2026 ยอดชำระ 1,450 บาท",
+      amount: 1450,
+      due_date: "15 ต.ค. 2026",
+      suggested_filename: "2026-09-30_ค่าไฟ_1450.pdf",
+    };
+    const driveUrl = "https://drive.google.com/file/d/testdoc/view";
+    const flex = buildDocumentSummaryFlexMessage(doc, driveUrl, "2026-09/02_บิลและใบแจ้งหนี้");
+
+    expect(flex.type).toBe("bubble");
+    expect(flex.header.contents[1].text).toContain("จัดเก็บเอกสารและสรุปสำเร็จ");
+    expect(flex.body.contents[0].text).toBe("ใบแจ้งค่าไฟฟ้า กฟน.");
+    expect(flex.footer?.contents[0].action?.uri).toBe(driveUrl);
+  });
 });
+

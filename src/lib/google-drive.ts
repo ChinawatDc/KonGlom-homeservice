@@ -22,9 +22,9 @@ function getDriveClient() {
 }
 
 /**
- * ค้นหาหรือสร้างโฟลเดอร์ตามปี/เดือน เช่น "2026/09"
+ * ค้นหาหรือสร้างโฟลเดอร์ตามชื่อใต้ parentId
  */
-async function getOrCreateYearMonthFolder(drive: any, parentId: string, folderName: string): Promise<string> {
+async function getOrCreateFolder(drive: any, parentId: string, folderName: string): Promise<string> {
   const query = `'${parentId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
   const res = await drive.files.list({
     q: query,
@@ -52,15 +52,18 @@ async function getOrCreateYearMonthFolder(drive: any, parentId: string, folderNa
 export interface DriveUploadResult {
   fileId: string;
   webViewLink: string;
+  folderPath?: string;
 }
 
 /**
- * อัปโหลดรูปภาพ Buffer ไปยัง Google Drive
+ * อัปโหลดไฟล์ (รูปภาพ, สลิป, หรือเอกสาร PDF) ไปยัง Google Drive
+ * รองรับการแยกโฟลเดอร์ย่อยตามหมวดหมู่อัตโนมัติ (เช่น 2026-09/01_สลิปโอนเงิน หรือ 2026-09/02_บิลและเอกสาร)
  */
-export async function uploadImageToDrive(
+export async function uploadFileToDrive(
   buffer: Buffer,
   fileName: string,
-  mimeType: string = "image/jpeg"
+  mimeType: string = "image/jpeg",
+  subFolder?: string
 ): Promise<DriveUploadResult | null> {
   const drive = getDriveClient();
   const parentFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
@@ -69,14 +72,23 @@ export async function uploadImageToDrive(
     return {
       fileId: "mock_file_id",
       webViewLink: "https://drive.google.com",
+      folderPath: subFolder ? `2026-09/${subFolder}` : "2026-09",
     };
   }
 
   try {
-    // แยกโฟลเดอร์ตาม YYYY-MM
+    // 1. แยกโฟลเดอร์หลักตาม YYYY-MM เช่น "2026-09"
     const now = new Date();
-    const folderName = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-    const targetFolderId = await getOrCreateYearMonthFolder(drive, parentFolderId, folderName);
+    const monthFolderName = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const monthFolderId = await getOrCreateFolder(drive, parentFolderId, monthFolderName);
+
+    // 2. ถ้ามี subFolder (เช่น "01_สลิปโอนเงิน", "02_บิลและเอกสาร", "03_เอกสารลดหย่อนภาษี")
+    let targetFolderId = monthFolderId;
+    let fullFolderPath = monthFolderName;
+    if (subFolder) {
+      targetFolderId = await getOrCreateFolder(drive, monthFolderId, subFolder);
+      fullFolderPath = `${monthFolderName}/${subFolder}`;
+    }
 
     const fileMetadata = {
       name: fileName,
@@ -95,9 +107,9 @@ export async function uploadImageToDrive(
     });
 
     const fileId = file.data.id!;
-    let webViewLink = file.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
+    const webViewLink = file.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
 
-    // กำหนด Permission ให้เปิดดูผ่านลิงก์ได้
+    // กำหนด Permission ให้สมาชิกเปิดดูผ่านลิงก์ได้
     try {
       await drive.permissions.create({
         fileId,
@@ -113,9 +125,13 @@ export async function uploadImageToDrive(
     return {
       fileId,
       webViewLink,
+      folderPath: fullFolderPath,
     };
   } catch (error) {
     console.error("Google Drive Upload Error:", error);
     return null;
   }
 }
+
+// Backward compatibility alias
+export const uploadImageToDrive = uploadFileToDrive;

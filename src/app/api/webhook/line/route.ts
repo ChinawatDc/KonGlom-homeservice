@@ -11,6 +11,7 @@ import {
   buildReminderFlexMessage,
   buildMedicineFlexMessage,
   buildRecipeFlexMessage,
+  buildDocumentSummaryFlexMessage,
 } from "@/lib/line";
 import {
   parseSlipDocument,
@@ -19,8 +20,9 @@ import {
   parseMedicineLabel,
   checkHealthClaim,
   suggestFridgeRecipes,
+  summarizeDocument,
 } from "@/lib/gemini";
-import { uploadImageToDrive } from "@/lib/google-drive";
+import { uploadFileToDrive, uploadImageToDrive } from "@/lib/google-drive";
 
 export const maxDuration = 60; // รองรับประมวลผล Multimodal AI
 
@@ -65,15 +67,14 @@ export async function POST(req: Request) {
       const message = event.message;
 
       // =========================================================================
-      // 1. จัดการรูปภาพ & เอกสารไฟล์ (PDF สลิป/บิล / Phase 6: ตรวจสลิปซ้ำ / Phase 4: ซองยา)
+      // =========================================================================
+      // 1. จัดการรูปภาพ & เอกสารไฟล์ (PDF, PNG, JPG, บิล, สลิป, ซองยา, เอกสารภาษี)
       // =========================================================================
       if (message.type === "image" || message.type === "file") {
         try {
           const isPdf = message.type === "file" && (message.fileName?.toLowerCase().endsWith(".pdf") || true);
           const mimeType = isPdf ? "application/pdf" : "image/jpeg";
-          const fileName = message.type === "file" 
-            ? (message.fileName || `document_${Date.now()}.pdf`)
-            : `konglom_${Date.now()}.jpg`;
+          const originalName = message.type === "file" ? (message.fileName || "document.pdf") : "image.jpg";
 
           // ดึงไฟล์/ภาพจาก LINE
           const stream = await lineBlobClient.getMessageContent(message.id);
@@ -81,13 +82,13 @@ export async function POST(req: Request) {
           for await (const chunk of stream as any) chunks.push(Buffer.from(chunk));
           const fileBuffer = Buffer.concat(chunks);
 
-          // ทำงานคู่ขนาน: OCR สลิป/เอกสาร + อัปโหลด Google Drive
-          const [slipData, driveUpload] = await Promise.all([
-            parseSlipDocument(fileBuffer, mimeType),
-            uploadImageToDrive(fileBuffer, fileName, mimeType),
-          ]);
+          const now = new Date();
+          const datePrefix = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
 
-          // ถ้าเป็นสลิปโอนเงิน / ใบเสร็จ / บิล PDF (Phase 1, 6, 7)
+          // ตรวจสอบขั้นแรก: สลิปโอนเงิน / ใบเสร็จรับเงิน
+          const slipData = await parseSlipDocument(fileBuffer, mimeType);
+
+          // กรณีที่ 1: สลิปโอนเงิน / ใบเสร็จการเงิน (Phase 1, 6, 7)
           if (slipData.is_slip && slipData.amount) {
             const senderName = await getSenderDisplayName(groupId, userId);
 
@@ -118,6 +119,14 @@ export async function POST(req: Request) {
                 continue;
               }
             }
+
+            // แยกโฟลเดอร์ Google Drive ตามหมวดหมู่
+            const subFolder = slipData.is_tax_deductible ? "03_เอกสารลดหย่อนภาษี" : "01_สลิปโอนเงิน";
+            const fileExt = isPdf ? "pdf" : "jpg";
+            const cleanFileName = `${datePrefix}_สลิป_${slipData.bank || "ธนาคาร"}_${slipData.amount}บาท.${fileExt}`;
+
+            // อัปโหลดเข้า Google Drive พร้อมโฟลเดอร์ย่อย
+            const driveUpload = await uploadFileToDrive(fileBuffer, cleanFileName, mimeType, subFolder);
 
             // บันทึก DB พร้อมข้อมูลลดหย่อนภาษี (Phase 7)
             await db.insert(expenses).values({
@@ -150,10 +159,47 @@ export async function POST(req: Request) {
             continue;
           }
 
-          // ถ้าไม่ใช่สลิป ลองตรวจว่าเป็นซองยาหรือไม่ (เฉพาะภาพ)
+          // กรณีที่ 2: เป็นไฟล์เอกสาร PDF ทั่วไป (บิลค่าไฟ, ใบแจ้งหนี้, สัญญา, กรมธรรม์, ผลตรวจ)
+          if (message.type === "file") {
+            const docSummary = await summarizeDocument(fileBuffer, mimeType);
+
+            let subFolder = "05_เอกสารทั่วไป";
+            if (docSummary.doc_category === "เอกสารลดหย่อนภาษี") {
+              subFolder = "03_เอกสารลดหย่อนภาษี";
+            } else if (docSummary.doc_category === "บิลและใบแจ้งหนี้") {
+              subFolder = "02_บิลและใบแจ้งหนี้";
+            } else if (docSummary.doc_category === "สุขภาพและการแพทย์") {
+              subFolder = "04_สุขภาพและยา";
+            }
+
+            const cleanFileName = `${datePrefix}_${docSummary.suggested_filename || originalName}`;
+            const driveUpload = await uploadFileToDrive(fileBuffer, cleanFileName, mimeType, subFolder);
+
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "flex",
+                  altText: `สรุปเอกสาร: ${docSummary.doc_title}`,
+                  contents: buildDocumentSummaryFlexMessage(
+                    docSummary,
+                    driveUpload?.webViewLink,
+                    driveUpload?.folderPath
+                  ) as any,
+                },
+              ],
+            });
+            continue;
+          }
+
+          // กรณีที่ 3: เป็นรูปภาพ (PNG / JPG) ตรวจซองยา หรือตู้เย็น
           if (message.type === "image") {
             const medicineData = await parseMedicineLabel(fileBuffer);
             if (medicineData.is_medicine && medicineData.medicine_name) {
+              const subFolder = "04_สุขภาพและยา";
+              const cleanFileName = `${datePrefix}_ยา_${medicineData.medicine_name}.jpg`;
+              const driveUpload = await uploadFileToDrive(fileBuffer, cleanFileName, mimeType, subFolder);
+
               await db.insert(medicines).values({
                 groupId,
                 medicineName: medicineData.medicine_name,
@@ -191,18 +237,23 @@ export async function POST(req: Request) {
               });
               continue;
             }
+
+            // ถ้าเป็นรูปภาพทั่วไป เก็บในไดรฟ์หมวดหมู่รูปภาพทั่วไป
+            const subFolder = "05_รูปภาพทั่วไป";
+            const cleanFileName = `${datePrefix}_photo_${Date.now()}.jpg`;
+            const driveUpload = await uploadFileToDrive(fileBuffer, cleanFileName, mimeType, subFolder);
+
+            await lineClient.replyMessage({
+              replyToken,
+              messages: [
+                {
+                  type: "text",
+                  text: `📸 ได้รับรูปภาพและสำรองเข้า Google Drive เรียบร้อยแล้วครับ\n📁 โฟลเดอร์: ${driveUpload?.folderPath || "Google Drive"}\n🔗 ดูไฟล์: ${driveUpload?.webViewLink || ""}`,
+                },
+              ],
+            });
+            continue;
           }
-
-          // ถ้าเป็นไฟล์เอกสารหรือรูปที่ไม่ใช่สลิป ตอบแจ้งเตือนให้ผู้ใช้ทราบ (ไม่เงียบหาย!)
-          const fileNote = message.type === "file" 
-            ? `📄 ได้รับเอกสาร "${fileName}" และสำรองเข้า Google Drive แล้ว แต่ไม่พบข้อมูลสลิปหรือบิลการเงินครับ`
-            : `📸 ได้รับรูปภาพแล้วครับ แต่ระบบวิเคราะห์แล้วไม่พบว่าเป็นสลิปเงินหรือซองยา\n\n💡 พิมพ์ "@บอท" เพื่อดูคำสั่งที่ใช้งานได้ครับ`;
-
-          await lineClient.replyMessage({
-            replyToken,
-            messages: [{ type: "text", text: fileNote }],
-          });
-          continue;
         } catch (err: any) {
           console.error("Error processing media event:", err);
           try {
